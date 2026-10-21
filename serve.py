@@ -7,4 +7,9 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store'); super().end_headers()
     def log_message(self, *a): pass
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-http.server.ThreadingHTTPServer(('127.0.0.1', port), H).serve_forever()
+host = '0.0.0.0'
+print(f'serving on {host}:{port}', flush=True)
+try:
+    http.server.ThreadingHTTPServer((host, port), H).serve_forever()
+except KeyboardInterrupt:
+    pass
