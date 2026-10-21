@@ -1,0 +1,48 @@
+/* ---------- touch controls (phones and tablets, see touch.js) ---------- */
+.touchui { display: none; position: absolute; inset: 0; pointer-events: auto; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.touch .touchui { display: block; }
+#hud.nogame .touchui { display: none; }
+body.touch #c { touch-action: none; }
+.tb { --s: 13vh; position: absolute; right: calc(var(--x) - var(--s) / 2); bottom: calc(var(--y) - var(--s) / 2); width: var(--s); height: var(--s); min-width: 40px; min-height: 40px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2.5px solid var(--ink); color: var(--ink); background: rgba(255, 253, 246, .38); box-shadow: 2px 3px 0 rgba(26, 48, 192, .25); transition: transform .06s, background .06s; }
+.tb svg { width: 56%; height: 56%; }
+.tb.on { background: rgba(255, 253, 246, .8); transform: scale(.92); }
+.tb.lit { background: var(--red); border-color: var(--red); color: #fff; }
+.tb-fire { --x: 17vh; --y: 21vh; --s: 25vh; border-width: 3px; color: var(--red); border-color: var(--red); }
+.tb-fire svg { width: 50%; height: 50%; }
+.tb-jump { --x: 42vh; --y: 10vh; --s: 16vh; }
+.tb-crouch { --x: 41vh; --y: 31vh; }
+.tb-grapple { --x: 31vh; --y: 44vh; --s: 14vh; }
+.tb-aim { --x: 15vh; --y: 47vh; --s: 14vh; }
+.tb-reload { --x: 7vh; --y: 63vh; --s: 11.5vh; }
+.tb-swap { --x: 22vh; --y: 66vh; --s: 11.5vh; }
+.tb-melee { --x: 58vh; --y: 9vh; --s: 11.5vh; }
+.tb-grenade { --x: 57vh; --y: 25vh; --s: 11.5vh; }
+.tb-pause, .tb-score { --s: 11vh; right: auto; bottom: auto; left: 2.5vh; top: 2.5vh; }
+.tb-score { top: 16vh; display: none; }
+.touchui.online .tb-score { display: flex; }
+.tjoy { position: absolute; left: 22vh; top: calc(100% - 24vh); width: 30vh; height: 30vh; min-width: 96px; min-height: 96px; transform: translate(-50%, -50%); border-radius: 50%;
+  border: 2.5px dashed var(--ink); background: rgba(255, 253, 246, .22); opacity: .45; pointer-events: none; }
+.tjoy.live { opacity: .85; }
+.tj-knob { position: absolute; left: 50%; top: 50%; width: 42%; height: 42%; margin: -21% 0 0 -21%; border-radius: 50%; background: rgba(26, 48, 192, .55); border: 2.5px solid var(--ink); box-sizing: border-box; }
+/* the HUD makes room for the thumbs: health and ammo go up under the score, the weapon list (tap the swap button instead) goes */
+body.touch .hud-bl { bottom: auto; top: calc(3% + max(calc(44 * var(--u)), 18px)); }
+body.touch .hud-bl .tally, body.touch .hud-br { display: none; }
+body.touch .tip { bottom: 36%; }
+body.touch .coach { bottom: 40%; }
+.tki { display: inline-flex; vertical-align: middle; width: 1.3em; height: 1.3em; padding: 2px; border: 2px solid currentColor; border-radius: 50%; box-sizing: border-box; }
+.tki svg { width: 100%; height: 100%; }
+kbd.tkb { display: inline-flex; align-items: center; justify-content: center; padding: 2px 4px; }
+kbd.tkb svg { width: 1.2em; height: 1.2em; }
+.coach kbd.tkb svg { width: 1.5em; height: 1.5em; }
+.screen .panel .devnote.rotnote { display: none; }
+@media (orientation: portrait) { .screen .panel .devnote.rotnote { display: inline-block; } }
+body.touch .screen .settings .k { display: none; }
+
+/* name and health over other players in an online match */
+.nametags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.ntag { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: calc(3 * var(--u)); transform-origin: 50% 100%; white-space: nowrap; }
+.ntag span { font-size: max(calc(22 * var(--u)), 12px); color: var(--ink); text-shadow: 0 0 3px #fffdf5, 0 0 3px #fffdf5, 0 0 2px #fffdf5; }
+.ntag .bar { width: calc(90 * var(--u)); height: calc(9 * var(--u)); border-width: 2px; background: rgba(255, 253, 245, 0.6); }
+.ntag .fill { background: repeating-linear-gradient(-55deg, var(--red) 0 2px, transparent 2px calc(5 * var(--u))); }
+

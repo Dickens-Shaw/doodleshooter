@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="marker">
+<html lang="zh-CN" data-theme="marker">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,20 +10,13 @@ try {
   document.documentElement.dataset.theme = savedTheme === 'ballpoint' ? 'ballpoint' : 'marker';
 } catch (e) {}
 </script>
-<link rel="stylesheet" href="./vendor/fonts/comic-neue.css">
-<link rel="stylesheet" href="./style.css">
-<script type="importmap">
-{ "imports": {
-  "three": "./vendor/three/three.module.js",
-  "three/addons/": "./vendor/three/addons/"
-} }
-</script>
+<link rel="stylesheet" href="%BASE_URL%vendor/fonts/comic-neue.css">
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hud"></div>
-<script src="./vendor/crazygames-sdk-v3.js"></script>
-<script src="./vendor/peerjs/peerjs.min.js"></script>
-<script type="module" src="./src/main.js"></script>
+<script src="%BASE_URL%vendor/crazygames-sdk-v3.js"></script>
+<script src="%BASE_URL%vendor/peerjs/peerjs.min.js"></script>
+<script type="module" src="/src/main.js"></script>
 </body>
 </html>

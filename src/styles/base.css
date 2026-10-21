@@ -1,0 +1,7 @@
+:root { --ink: #1a30c0; --red: #d02030; --paper: #f6f3e6;
+  /* UI scale: sizes below are written for a 1366x768 window and shrink with smaller ones (down to 60%), so the
+     menus and HUD keep their proportions in CrazyGames' small embedded frame. Larger windows stay at 100%. */
+  --u: clamp(0.6px, min(0.0732vw, 0.1302vh), 1px); }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper); font-family: 'Comic Sans MS', 'Comic Neue', 'Marker Felt', 'Segoe Print', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+#hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); user-select: none; overflow: hidden; }

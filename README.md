@@ -9,13 +9,14 @@ files: the paper, the ink outlines, the hatching, the enemies and the music are 
 
 ## Running it
 
-It is a static site, so any web server works. Locally:
+Install dependencies, then start the Vite dev server:
 
 ```bash
-python3 serve.py 8910
+npm install
+npm run dev
 ```
 
-then open http://127.0.0.1:8910. On Vercel (or any static host) just deploy the folder as is.
+then open http://127.0.0.1:8910. `npm run build` writes a static site to `dist/`; deploy that folder (or the Docker image) to any static host.
 
 ## Modes
 

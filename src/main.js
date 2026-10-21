@@ -1,6 +1,11 @@
 // Game bootstrap: solo waves, free-for-all lobbies, checkpoints, scoring, screens and the loop.
 // Online play is peer-to-peer: one player's browser hosts the lobby and keeps score, every
 // player runs their own body, and each one tells the others what it did.
+import './styles/base.css';
+import './styles/hud.css';
+import './styles/menus.css';
+import './styles/touch.css';
+import './styles/ballpoint.css';
 import * as THREE from 'three';
 import { InkRenderer, INK, makeInkMaterial } from './render.js';
 import { World } from './physics.js';

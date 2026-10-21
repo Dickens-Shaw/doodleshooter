@@ -30,20 +30,9 @@ export const LANGS = [
 ];
 const TABLE = Object.fromEntries(LANGS.map(([code, , dict]) => [code, dict]));
 
-// a browser or platform locale ("pt-BR", "zh-Hant-HK", "es-419") mapped to one of ours, or null
-export function matchLang(loc) {
-  if (!loc) return null;
-  const l = String(loc).replace('_', '-').toLowerCase();
-  if (l.startsWith('zh')) return /hant|tw|hk|mo/.test(l) ? 'zh-TW' : 'zh-CN';
-  const base = l.split('-')[0];
-  if (base === 'in') return 'id';
-  return TABLE[base] ? base : null;
-}
 function detect() {
   const saved = store.get('doodle_lang'); if (saved && TABLE[saved]) return saved;
-  try { const cg = window.CrazyGames && window.CrazyGames.SDK && window.CrazyGames.SDK.user && window.CrazyGames.SDK.user.systemInfo; const m = cg && matchLang(cg.locale); if (m) return m; } catch (e) { /* no SDK */ }
-  for (const loc of navigator.languages || [navigator.language]) { const m = matchLang(loc); if (m) return m; }
-  return 'en';
+  return 'zh-CN';
 }
 export const lang = detect();
 const dict = TABLE[lang];

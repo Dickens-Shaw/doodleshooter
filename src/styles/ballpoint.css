@@ -1,0 +1,82 @@
+/* Ballpoint skin: the same screens, drawn in blue ink on the notebook card instead of marker stickers. */
+[data-theme="ballpoint"] .screen { background: rgba(246, 243, 230, .55); }
+[data-theme="ballpoint"] .screen .panel { color: var(--ink); font-family: inherit; background: rgba(250, 248, 238, .93);
+  border: 3px solid var(--ink); box-shadow: calc(6 * var(--u)) calc(6 * var(--u)) 0 rgba(26, 48, 192, .15);
+  border-radius: calc(12 * var(--u)) calc(18 * var(--u)) calc(10 * var(--u)) calc(16 * var(--u)) / calc(16 * var(--u)) calc(10 * var(--u)) calc(18 * var(--u)) calc(12 * var(--u)); }
+[data-theme="ballpoint"] .screen .panel h1,
+[data-theme="ballpoint"] .screen .panel h1.logo,
+[data-theme="ballpoint"] .screen .panel h1.logo span { color: var(--ink); font-family: inherit; font-weight: normal; text-shadow: none; letter-spacing: 3px; }
+[data-theme="ballpoint"] .screen .panel h1::after { content: none; }
+[data-theme="ballpoint"] .screen .panel h2 { color: var(--ink); font-family: inherit; font-weight: normal; }
+[data-theme="ballpoint"] .screen .panel h2 .badge { color: var(--ink); background: transparent; border-color: var(--ink); box-shadow: none; }
+[data-theme="ballpoint"] .screen .panel h2 .num { color: var(--red); font-family: inherit; text-shadow: none; }
+[data-theme="ballpoint"] .screen kbd,
+[data-theme="ballpoint"] .screen kbd.kd,
+[data-theme="ballpoint"] .screen kbd.kr,
+[data-theme="ballpoint"] .screen kbd.ky,
+[data-theme="ballpoint"] .screen kbd.kp,
+[data-theme="ballpoint"] .screen kbd.kt,
+[data-theme="ballpoint"] .screen kbd.kk { font-family: inherit; color: var(--ink); background: transparent; border: 2px solid var(--ink); border-style: solid; box-shadow: none; }
+[data-theme="ballpoint"] .screen kbd.kd { color: var(--paper); background: var(--ink); }
+[data-theme="ballpoint"] .colhead { color: var(--ink); font-weight: normal; border-bottom-color: var(--ink); }
+[data-theme="ballpoint"] .screen .settings { color: var(--ink); font-weight: normal; background: none; border-top: 2px solid var(--ink); }
+[data-theme="ballpoint"] .screen .settings b { color: var(--red); font-family: inherit; }
+[data-theme="ballpoint"] .screen .settings .k { color: var(--ink); opacity: .6; }
+[data-theme="ballpoint"] .screen .settings input[type=range] { width: calc(220 * var(--u)); accent-color: var(--ink); }
+[data-theme="ballpoint"] .screen .settings input[type=range]::-webkit-slider-runnable-track,
+[data-theme="ballpoint"] .screen .settings input[type=range]::-moz-range-track { height: 4px; border: 0; border-radius: 2px; background: rgba(26, 48, 192, .35); }
+[data-theme="ballpoint"] .screen .settings input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border: 0; border-radius: 50%; background: var(--ink); box-shadow: none; }
+[data-theme="ballpoint"] .screen .settings input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: var(--ink); box-shadow: none; }
+[data-theme="ballpoint"] .screen .settings input[type=checkbox] { -webkit-appearance: auto; appearance: auto; accent-color: var(--ink); width: calc(17 * var(--u)); height: calc(17 * var(--u)); box-shadow: none; }
+[data-theme="ballpoint"] .screen .settings input[type=checkbox]:checked { background: transparent; }
+[data-theme="ballpoint"] .screen .settings input[type=checkbox]:checked::after { content: none; }
+[data-theme="ballpoint"] .screen .settings .langsel select { color: var(--ink); border-color: var(--ink); box-shadow: none; font-family: inherit; }
+[data-theme="ballpoint"] .screen .mainbtns button,
+[data-theme="ballpoint"] .screen .online button,
+[data-theme="ballpoint"] .screen .checkpoints button,
+[data-theme="ballpoint"] .screen .mapbtn,
+[data-theme="ballpoint"] .screen .modebtn { font-family: inherit; font-weight: normal; color: var(--paper); background: var(--ink); border-color: var(--ink); box-shadow: none; letter-spacing: 0; }
+[data-theme="ballpoint"] .screen .mainbtns button:hover,
+[data-theme="ballpoint"] .screen .online button:hover:not(:disabled),
+[data-theme="ballpoint"] .screen .checkpoints button:hover,
+[data-theme="ballpoint"] .screen .mapbtn:hover { filter: brightness(1.12); transform: none; background-color: var(--ink); box-shadow: none; }
+[data-theme="ballpoint"] .screen .mainbtns button.start { color: var(--paper); background: var(--ink); border-color: var(--ink); box-shadow: calc(6 * var(--u)) calc(7 * var(--u)) 0 rgba(0, 0, 0, .18); letter-spacing: 1px; }
+[data-theme="ballpoint"] .screen .mainbtns button.start:hover { transform: scale(1.03); box-shadow: calc(6 * var(--u)) calc(7 * var(--u)) 0 rgba(0, 0, 0, .18); }
+[data-theme="ballpoint"] .screen .mainbtns button i,
+[data-theme="ballpoint"] .screen .mainbtns button.start i,
+[data-theme="ballpoint"] .screen .mainbtns button:nth-child(2) i { color: inherit; opacity: .8; font-weight: normal; }
+[data-theme="ballpoint"] .screen .mainbtns button:nth-child(2),
+[data-theme="ballpoint"] .screen .mainbtns button:nth-child(2):hover { color: var(--paper); background: var(--red); border-color: var(--red); }
+[data-theme="ballpoint"] .screen .online button.alt,
+[data-theme="ballpoint"] .screen .checkpoints button,
+[data-theme="ballpoint"] .screen .mapbtn:not(.on) { color: var(--ink); background: transparent; }
+[data-theme="ballpoint"] .screen .online button.big { color: #fff; background: var(--ink); }
+[data-theme="ballpoint"] .screen .mapbtn.on,
+[data-theme="ballpoint"] .screen .modebtn.on { color: var(--paper); background: var(--ink); }
+[data-theme="ballpoint"] .screen .mapsel,
+[data-theme="ballpoint"] .screen .lobbylist { background: none; border-top: 2px solid var(--ink); }
+[data-theme="ballpoint"] .screen .online input[type=text] { color: var(--ink); background: transparent; border-color: var(--ink); box-shadow: none; font-family: inherit; }
+[data-theme="ballpoint"] .screen .code,
+[data-theme="ballpoint"] .screen .online .status,
+[data-theme="ballpoint"] .screen .status,
+[data-theme="ballpoint"] .screen .panel .stats b { color: var(--red); font-family: inherit; }
+[data-theme="ballpoint"] .screen .plist div,
+[data-theme="ballpoint"] .screen .scoreboard div,
+[data-theme="ballpoint"] .screen .lobbyrow { border-bottom: 1.5px solid rgba(26, 48, 192, .25); }
+[data-theme="ballpoint"] .screen .plist .me,
+[data-theme="ballpoint"] .screen .scoreboard .me { background: rgba(26, 48, 192, .08); }
+[data-theme="ballpoint"] .screen .beststat { color: var(--ink); opacity: .8; }
+[data-theme="ballpoint"] .screen .panel .go { color: var(--ink); font-family: inherit; font-style: normal; animation: blink 1.2s infinite; }
+[data-theme="ballpoint"] .screen .panel .intro-go { color: var(--paper); background: var(--ink); border-color: var(--ink); box-shadow: calc(5 * var(--u)) calc(6 * var(--u)) 0 rgba(26, 48, 192, .25); font-family: inherit; }
+[data-theme="ballpoint"] .board { color: var(--ink); background: rgba(250, 247, 238, .94); border-color: var(--ink); box-shadow: none; font-family: inherit; }
+[data-theme="ballpoint"] .board h3 { text-shadow: none; }
+[data-theme="ballpoint"] .board div { border-bottom: 1.5px solid rgba(26, 48, 192, .25); }
+[data-theme="ballpoint"] .board div.me { background: rgba(26, 48, 192, .1); }
+[data-theme="ballpoint"] .coach { --c-ink: var(--ink); --c-teal: var(--ink); color: var(--ink); background: rgba(250, 248, 238, .92); border-color: var(--ink); box-shadow: 3px 4px 0 rgba(26, 48, 192, .2); }
+[data-theme="ballpoint"] .screen .online input[type=radio] { border-color: var(--ink); }
+[data-theme="ballpoint"] .screen .online input[type=radio]:checked { background: radial-gradient(circle, var(--ink) 0 45%, #fff 50%); }
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="ballpoint"] .screen .mainbtns button,
+  [data-theme="ballpoint"] .screen .panel .go,
+  [data-theme="ballpoint"] .screen .panel .intro-go { animation: none; transition: none; }
+}
