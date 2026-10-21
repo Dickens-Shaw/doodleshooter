@@ -1,38 +1,77 @@
 // Procedural WebAudio sound effects (no external assets).
+// Everything plays through a small mixing desk: effects and music on their own buses, a short
+// generated room reverb that sounds get sent to (more of it the farther away they are), a glue
+// compressor and a limiter. Distant sounds also lose their top end, the way they do in air.
+// The palette leans on the notebook: pen scratches, paper tears and taps sit next to the guns.
 import * as THREE from 'three';
 import { clamp, rand, choose } from './util.js';
 
+const vary = (x, amt = 0.08) => x * (1 + (Math.random() * 2 - 1) * amt);
+
 class Sfx {
   constructor() {
-    this.ctx = null; this.master = null; this.noiseBuf = null; this.volume = 0.55;
+    this.ctx = null; this.master = null; this.noiseBuf = null; this.volume = 0.6;
     this.listenerPos = new THREE.Vector3(); this.listenerRight = new THREE.Vector3(1, 0, 0);
   }
+  // silence everything while a CrazyGames ad plays (set on adStarted, cleared when it ends), and while
+  // the platform's own sound setting is off; that one wins over the game's music toggle
+  setAdMute(on) { this._adMute = on; this._applyMute(); }
+  setPlatformMute(on) { this._pfMute = on; this._applyMute(); }
+  get muted() { return !!(this._adMute || this._pfMute); }
+  _applyMute() { if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, this.ctx.currentTime, 0.02); }
   init() {
     if (this.ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const ctx = this.ctx = new AC();
-    this.comp = ctx.createDynamicsCompressor(); this.comp.threshold.value = -16; this.comp.ratio.value = 5;
-    this.master = ctx.createGain(); this.master.gain.value = this.volume;
-    this.master.connect(this.comp); this.comp.connect(ctx.destination);
+    // master: glue compressor, then a fast limiter so a grenade on top of a boss never clips
+    this.master = ctx.createGain(); this.master.gain.value = this.muted ? 0 : this.volume;
+    this.comp = ctx.createDynamicsCompressor(); this.comp.threshold.value = -18; this.comp.knee.value = 8; this.comp.ratio.value = 3.5; this.comp.attack.value = 0.006; this.comp.release.value = 0.18;
+    this.limit = ctx.createDynamicsCompressor(); this.limit.threshold.value = -3; this.limit.knee.value = 0; this.limit.ratio.value = 20; this.limit.attack.value = 0.001; this.limit.release.value = 0.08;
+    this.master.connect(this.comp); this.comp.connect(this.limit); this.limit.connect(ctx.destination);
+    // effects bus and a send into a small room
+    this.sfx = ctx.createGain(); this.sfx.connect(this.master);
+    this.verb = ctx.createConvolver(); this.verb.buffer = this._roomIR(1.3, 2.6);
+    const verbTone = ctx.createBiquadFilter(); verbTone.type = 'lowpass'; verbTone.frequency.value = 4200;
+    this.verbIn = ctx.createGain(); this.verbIn.gain.value = 0.55;
+    this.verbIn.connect(this.verb); this.verb.connect(verbTone); verbTone.connect(this.master);
     const len = ctx.sampleRate * 2; this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    // a soft clipper for the low "thump" layers: rounds them off and adds punch
+    this.drive = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; this.drive[i] = Math.tanh(x * 2.6) / Math.tanh(2.6); }
+  }
+  // a stereo room impulse: a few early reflections, then a decaying, darkening noise tail
+  _roomIR(seconds, decay) {
+    const ctx = this.ctx, n = Math.floor(ctx.sampleRate * seconds), ir = ctx.createBuffer(2, n, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c); let lp = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / n; const k = 0.25 + 0.7 * t; lp = lp * k + (Math.random() * 2 - 1) * (1 - k);
+        d[i] = lp * Math.pow(1 - t, decay) * (i < ctx.sampleRate * 0.012 ? i / (ctx.sampleRate * 0.012) : 1);
+      }
+      for (const [ms, g] of [[11, 0.5], [19, 0.35], [31, 0.28], [47, 0.2]]) d[Math.floor(ctx.sampleRate * (ms + c * 3) / 1000)] += g * (c ? -1 : 1);
+    }
+    return ir;
   }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
   setListener(pos, right) { this.listenerPos.copy(pos); this.listenerRight.copy(right); }
-  _out(pos, base = 1) {
-    const ctx = this.ctx; const g = ctx.createGain(); let vol = base;
+  // where a sound goes: panned and filtered by its position, with a share sent to the room
+  _out(pos, base = 1, wet = 0.12) {
+    const ctx = this.ctx; const g = ctx.createGain(); let vol = base, last = g, send = wet;
     if (pos) {
       const dx = pos.x - this.listenerPos.x, dy = pos.y - this.listenerPos.y, dz = pos.z - this.listenerPos.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       vol *= 1 / (1 + dist * 0.09);
+      send = wet + Math.min(0.45, dist * 0.012);
+      if (dist > 6) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = clamp(22000 / (1 + (dist - 6) * 0.12), 1200, 20000); f.Q.value = 0.5; last.connect(f); last = f; }
       if (dist > 0.5 && ctx.createStereoPanner) {
-        const pan = clamp((dx * this.listenerRight.x + dz * this.listenerRight.z) / dist, -1, 1) * 0.75;
-        const p = ctx.createStereoPanner(); p.pan.value = pan; g.gain.value = vol; g.connect(p); p.connect(this.master); return g;
+        const p = ctx.createStereoPanner(); p.pan.value = clamp((dx * this.listenerRight.x + dz * this.listenerRight.z) / dist, -1, 1) * 0.75; last.connect(p); last = p;
       }
     }
-    g.gain.value = vol; g.connect(this.master); return g;
+    g.gain.value = vol; last.connect(this.sfx);
+    if (send > 0) { const s = ctx.createGain(); s.gain.value = send; last.connect(s); s.connect(this.verbIn); }
+    return g;
   }
-  noise({ dur = 0.1, gain = 0.5, type = 'lowpass', freq = 1000, freqEnd = null, q = 1, attack = 0.002, pos = null, delay = 0, hp = 0, at }) {
+  noise({ dur = 0.1, gain = 0.5, type = 'lowpass', freq = 1000, freqEnd = null, q = 1, attack = 0.002, pos = null, delay = 0, hp = 0, at, wet, out }) {
     if (!this.ctx) return; const ctx = this.ctx; const t0 = at !== undefined ? at : ctx.currentTime + delay;
     const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true; src.loopEnd = 2;
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, t0);
@@ -40,133 +79,155 @@ class Sfx {
     const env = ctx.createGain(); env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + attack); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(f); let last = f;
     if (hp > 0) { const h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; last.connect(h); last = h; }
-    last.connect(env); env.connect(this._out(pos));
+    last.connect(env); env.connect(out || this._out(pos, 1, wet ?? 0.12));
     src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
   }
-  tone({ freq = 440, freqEnd = null, dur = 0.2, gain = 0.3, type = 'sine', attack = 0.005, pos = null, delay = 0, at, out }) {
+  tone({ freq = 440, freqEnd = null, dur = 0.2, gain = 0.3, type = 'sine', attack = 0.005, pos = null, delay = 0, at, out, wet, drive = false }) {
     if (!this.ctx) return; const ctx = this.ctx; const t0 = at !== undefined ? at : ctx.currentTime + delay;
     const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
     if (freqEnd) o.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur);
     const env = ctx.createGain(); env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + attack); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(env); env.connect(out || this._out(pos)); o.start(t0); o.stop(t0 + dur + 0.05);
+    let src = o; if (drive) { const ws = ctx.createWaveShaper(); ws.curve = this.drive; o.connect(ws); src = ws; }
+    src.connect(env); env.connect(out || this._out(pos, 1, wet ?? 0.12)); o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  // ---------- building blocks ----------
+  // the first few milliseconds of a gunshot: a hard, bright crack
+  _crack(gain, pos, freq = 2200, delay = 0) { this.noise({ dur: 0.018, gain, type: 'highpass', freq: vary(freq, 0.1), attack: 0.0005, pos, delay, wet: 0.2 }); }
+  // the low punch under it: a falling sine pushed into the soft clipper
+  _thump(f0, f1, dur, gain, pos, delay = 0) { this.tone({ freq: vary(f0, 0.06), freqEnd: f1, dur, gain, type: 'sine', attack: 0.001, pos, delay, drive: true, wet: 0.05 }); }
+  // the body and the tail that rings off the walls
+  _body(freq, freqEnd, dur, gain, pos, q = 0.7, delay = 0) { this.noise({ dur, gain, type: 'bandpass', freq: vary(freq, 0.1), freqEnd, q, attack: 0.001, pos, delay, wet: 0.35 }); }
+  // a pen scratching across paper: a run of tiny bright grains
+  scribble(pos, dur = 0.25, gain = 0.22, delay = 0) {
+    if (!this.ctx) return; const n = Math.max(3, Math.round(dur / 0.022));
+    for (let i = 0; i < n; i++) this.noise({ dur: rand(0.012, 0.03), gain: gain * rand(0.5, 1), type: 'bandpass', freq: rand(1800, 4200), q: rand(2, 5), attack: 0.001, pos, delay: delay + i * dur / n + rand(0, 0.008), wet: 0.08 });
+  }
+  // paper tearing: a scribble with a low, papery rip under it
+  _tear(pos, dur = 0.3, gain = 0.4, delay = 0) {
+    this.noise({ dur, gain: gain * 0.7, type: 'bandpass', freq: rand(900, 1300), freqEnd: rand(2200, 3000), q: 1.2, attack: 0.01, pos, delay, wet: 0.15 });
+    this.scribble(pos, dur * 0.8, gain * 0.6, delay);
   }
   // ---------- game sounds ----------
   shot() {
-    this.noise({ dur: 0.17, gain: 0.7, type: 'bandpass', freq: 1200, freqEnd: 250, q: 0.7 });
-    this.noise({ dur: 0.06, gain: 0.45, type: 'highpass', freq: 2800 });
-    this.tone({ freq: 160, freqEnd: 40, dur: 0.15, gain: 0.6, type: 'triangle' });
+    this._crack(0.55); this._thump(150, 45, 0.14, 0.75);
+    this._body(1300, 260, 0.16, 0.6); this.noise({ dur: 0.35, gain: 0.12, type: 'lowpass', freq: 900, freqEnd: 200, delay: 0.02, wet: 0.6 });
+    this.noise({ dur: 0.02, gain: 0.12, type: 'bandpass', freq: vary(5200), q: 4, delay: 0.05, wet: 0 }); // the bolt
   }
   // another player's gun, heard from where they stand: a bit hotter than a bot's so it cuts through
   remoteShot(kind, pos) {
-    if (kind === 'shotgun') { this.noise({ dur: 0.32, gain: 1.0, type: 'lowpass', freq: 1600, freqEnd: 150, pos }); this.tone({ freq: 95, freqEnd: 30, dur: 0.26, gain: 0.7, type: 'triangle', pos }); }
-    else if (kind === 'sniper') { this.noise({ dur: 0.4, gain: 1.0, type: 'bandpass', freq: 750, freqEnd: 120, q: 0.5, pos }); this.tone({ freq: 420, freqEnd: 50, dur: 0.32, gain: 0.5, type: 'sawtooth', pos }); }
-    else { this.noise({ dur: 0.16, gain: 0.85, type: 'bandpass', freq: rand(1000, 1500), freqEnd: 220, q: 0.8, pos }); this.noise({ dur: 0.05, gain: 0.4, type: 'highpass', freq: 2600, pos }); this.tone({ freq: 200, freqEnd: 50, dur: 0.12, gain: 0.45, type: 'square', pos }); }
+    if (kind === 'shotgun') { this._crack(0.6, pos, 1600); this._thump(95, 30, 0.28, 0.9, pos); this._body(1100, 140, 0.34, 0.9, pos, 0.5); }
+    else if (kind === 'sniper') { this._crack(0.75, pos, 2800); this._thump(120, 30, 0.4, 0.8, pos); this._body(900, 110, 0.5, 0.9, pos, 0.5); }
+    else { this._crack(0.5, pos); this._thump(160, 50, 0.12, 0.6, pos); this._body(rand(1100, 1500), 220, 0.16, 0.8, pos); }
   }
   enemyShot(pos) {
-    this.noise({ dur: 0.14, gain: 0.5, type: 'bandpass', freq: rand(900, 1500), freqEnd: 200, q: 0.8, pos });
-    this.tone({ freq: 220, freqEnd: 60, dur: 0.1, gain: 0.3, type: 'square', pos });
+    this._crack(0.3, pos, 1800); this._body(rand(900, 1500), 200, 0.14, 0.5, pos, 0.8);
+    this.tone({ freq: vary(240), freqEnd: 70, dur: 0.1, gain: 0.25, type: 'triangle', pos });
   }
-  shotgun(pos) {
-    this.noise({ dur: 0.3, gain: 0.7, type: 'lowpass', freq: 1500, freqEnd: 150, pos });
-    this.tone({ freq: 90, freqEnd: 30, dur: 0.25, gain: 0.5, type: 'triangle', pos });
-  }
-  sniperShot(pos) {
-    this.noise({ dur: 0.35, gain: 0.7, type: 'bandpass', freq: 700, freqEnd: 120, q: 0.5, pos });
-    this.tone({ freq: 400, freqEnd: 50, dur: 0.3, gain: 0.35, type: 'sawtooth', pos });
-  }
+  shotgun(pos) { this._crack(0.45, pos, 1500); this._thump(90, 30, 0.25, 0.6, pos); this._body(1000, 150, 0.3, 0.7, pos, 0.5); }
+  sniperShot(pos) { this._crack(0.55, pos, 2600); this._thump(110, 35, 0.3, 0.5, pos); this._body(750, 120, 0.4, 0.7, pos, 0.5); }
   sniperAim(pos) { this.tone({ freq: 1800, dur: 0.12, gain: 0.12, type: 'sine', pos }); }
-  empty() { this.noise({ dur: 0.03, gain: 0.3, type: 'highpass', freq: 3000 }); }
+  empty() { this.noise({ dur: 0.025, gain: 0.35, type: 'bandpass', freq: 3200, q: 3, attack: 0.0005, wet: 0.05 }); this.noise({ dur: 0.02, gain: 0.15, type: 'bandpass', freq: 1400, q: 3, delay: 0.03, wet: 0.05 }); }
   winded() { this.tone({ freq: 220, freqEnd: 140, dur: 0.14, gain: 0.1, type: 'triangle' }); }
+  // magazine out, magazine in, slap, charging handle
   reload() {
-    this.noise({ dur: 0.04, gain: 0.35, type: 'highpass', freq: 2500 });
-    this.noise({ dur: 0.12, gain: 0.2, type: 'bandpass', freq: 600, q: 2, delay: 0.25 });
-    this.noise({ dur: 0.05, gain: 0.4, type: 'highpass', freq: 2000, delay: 0.9 });
-    this.tone({ freq: 900, freqEnd: 500, dur: 0.06, gain: 0.15, type: 'square', delay: 1.25 });
+    this._click(0.0, 2600, 0.3); this.noise({ dur: 0.12, gain: 0.18, type: 'bandpass', freq: 700, q: 2, delay: 0.08, wet: 0.05 });
+    this._click(0.55, 1800, 0.35); this.noise({ dur: 0.06, gain: 0.35, type: 'lowpass', freq: 600, delay: 0.9, wet: 0.08 }); this._click(0.9, 2400, 0.4);
+    this._click(1.18, 3000, 0.3); this._click(1.27, 2100, 0.35);
   }
-  katanaSwing() { this.noise({ dur: 0.2, gain: 0.35, type: 'bandpass', freq: 500, freqEnd: 3000, q: 1.5 }); }
+  _click(delay, freq, gain) { this.noise({ dur: 0.03, gain, type: 'bandpass', freq: vary(freq), q: 2.5, attack: 0.0005, delay, wet: 0.06 }); }
+  katanaSwing() {
+    this.noise({ dur: 0.22, gain: 0.32, type: 'bandpass', freq: vary(500), freqEnd: 3400, q: 2.2, attack: 0.04, wet: 0.1 });
+    this.noise({ dur: 0.16, gain: 0.12, type: 'highpass', freq: 5000, attack: 0.05, wet: 0 });
+  }
   katanaHit() {
-    this.noise({ dur: 0.14, gain: 0.6, type: 'lowpass', freq: 900, freqEnd: 200 });
-    this.noise({ dur: 0.1, gain: 0.35, type: 'bandpass', freq: 2500, q: 0.6 });
-    this.tone({ freq: 180, freqEnd: 70, dur: 0.12, gain: 0.4, type: 'triangle' });
+    this._thump(170, 60, 0.12, 0.5); this.noise({ dur: 0.14, gain: 0.5, type: 'lowpass', freq: 1000, freqEnd: 200, wet: 0.15 });
+    this._tear(null, 0.16, 0.35);
   }
   parry() {
-    for (const f of [2200, 3300, 4700]) this.tone({ freq: f, freqEnd: f * 0.92, dur: 0.35, gain: 0.16, type: 'sine' });
-    this.noise({ dur: 0.05, gain: 0.5, type: 'highpass', freq: 4000 });
+    for (const f of [2200, 3300, 4700]) this.tone({ freq: vary(f, 0.02), freqEnd: f * 0.97, dur: 0.6, gain: 0.12, type: 'sine', wet: 0.4 });
+    this._crack(0.5, null, 4000);
   }
-  perfectParry() { this.parry(); this.tone({ freq: 880, freqEnd: 1760, dur: 0.25, gain: 0.2, type: 'triangle', delay: 0.03 }); }
-  grappleFire() { this.noise({ dur: 0.1, gain: 0.4, type: 'highpass', freq: 1500 }); this.tone({ freq: 500, freqEnd: 1500, dur: 0.18, gain: 0.18, type: 'sawtooth' }); }
-  grappleHit() { this.noise({ dur: 0.04, gain: 0.45, type: 'highpass', freq: 2000 }); this.tone({ freq: 300, freqEnd: 200, dur: 0.08, gain: 0.25, type: 'square' }); }
-  grappleRelease() { this.tone({ freq: 900, freqEnd: 300, dur: 0.12, gain: 0.12, type: 'sawtooth' }); }
+  perfectParry() { this.parry(); this.tone({ freq: 880, freqEnd: 1760, dur: 0.25, gain: 0.2, type: 'triangle', delay: 0.03, wet: 0.4 }); }
+  grappleFire() { this.noise({ dur: 0.08, gain: 0.35, type: 'highpass', freq: 1500 }); this.noise({ dur: 0.22, gain: 0.25, type: 'bandpass', freq: 900, freqEnd: 3500, q: 3, attack: 0.01 }); this.tone({ freq: 500, freqEnd: 1500, dur: 0.18, gain: 0.1, type: 'triangle' }); }
+  grappleHit() { this._crack(0.4, null, 2000); this._thump(260, 120, 0.08, 0.35); }
+  grappleRelease() { this.tone({ freq: 900, freqEnd: 300, dur: 0.12, gain: 0.1, type: 'triangle' }); this.noise({ dur: 0.1, gain: 0.12, type: 'bandpass', freq: 2500, freqEnd: 900, q: 2 }); }
   reelLoop(on) {
     if (!this.ctx) return;
-    if (on && !this._reel) { const ctx = this.ctx; const o = ctx.createBufferSource(); o.buffer = this.noiseBuf; o.loop = true; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380; f.Q.value = 0.7; const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(0.05, ctx.currentTime, 0.12); o.connect(f); f.connect(g); g.connect(this.master); o.start(); this._reel = { o, g }; }
+    if (on && !this._reel) { const ctx = this.ctx; const o = ctx.createBufferSource(); o.buffer = this.noiseBuf; o.loop = true; const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 520; f.Q.value = 1.4; const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(0.07, ctx.currentTime, 0.12); o.connect(f); f.connect(g); g.connect(this.sfx); o.start(); this._reel = { o, g }; }
     else if (!on && this._reel) { const r = this._reel; this._reel = null; r.g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05); r.o.stop(this.ctx.currentTime + 0.3); }
   }
-  footstep(speedFrac = 1) { this.noise({ dur: 0.07, gain: 0.12 * speedFrac, type: 'lowpass', freq: rand(400, 800) }); }
-  jump() { this.tone({ freq: 260, freqEnd: 480, dur: 0.1, gain: 0.1, type: 'triangle' }); this.noise({ dur: 0.05, gain: 0.1, type: 'lowpass', freq: 600 }); }
-  land(hard = 0.5) { this.noise({ dur: 0.14, gain: 0.15 + 0.35 * hard, type: 'lowpass', freq: 350 }); }
-  slide() { this.noise({ dur: 0.45, gain: 0.18, type: 'lowpass', freq: 1200, freqEnd: 300 }); }
-  wallJump() { this.noise({ dur: 0.08, gain: 0.25, type: 'lowpass', freq: 700 }); this.tone({ freq: 300, freqEnd: 600, dur: 0.12, gain: 0.12, type: 'triangle' }); }
+  // footsteps: a soft heel and a papery scuff, never the same twice
+  footstep(speedFrac = 1) { this.noise({ dur: vary(0.07, 0.2), gain: 0.13 * speedFrac, type: 'lowpass', freq: rand(350, 700), attack: 0.002, wet: 0.04 }); this.noise({ dur: 0.04, gain: 0.04 * speedFrac, type: 'bandpass', freq: rand(2500, 4000), q: 2, delay: 0.01, wet: 0 }); }
+  jump() { this.noise({ dur: 0.06, gain: 0.12, type: 'lowpass', freq: 700, wet: 0.04 }); this.noise({ dur: 0.12, gain: 0.06, type: 'bandpass', freq: 1200, freqEnd: 2400, q: 1.5, wet: 0 }); }
+  land(hard = 0.5) { this._thump(90, 40, 0.12, 0.15 + 0.4 * hard); this.noise({ dur: 0.14, gain: 0.12 + 0.25 * hard, type: 'lowpass', freq: 500, wet: 0.08 }); }
+  slide() { this.noise({ dur: 0.45, gain: 0.2, type: 'bandpass', freq: 900, freqEnd: 400, q: 0.8, attack: 0.02 }); this.scribble(null, 0.35, 0.06); }
+  wallJump() { this._thump(140, 60, 0.08, 0.3); this.noise({ dur: 0.08, gain: 0.2, type: 'lowpass', freq: 800 }); }
   mantle() { this.noise({ dur: 0.2, gain: 0.2, type: 'lowpass', freq: 900, freqEnd: 300 }); }
-  dash() { this.noise({ dur: 0.25, gain: 0.3, type: 'bandpass', freq: 800, freqEnd: 2500, q: 1 }); }
-  hurt() { this.tone({ freq: 200, freqEnd: 90, dur: 0.2, gain: 0.35, type: 'sawtooth' }); this.noise({ dur: 0.12, gain: 0.3, type: 'lowpass', freq: 500 }); }
-  death() { this.tone({ freq: 220, freqEnd: 30, dur: 1.2, gain: 0.4, type: 'sawtooth' }); this.noise({ dur: 0.8, gain: 0.35, type: 'lowpass', freq: 800, freqEnd: 80 }); }
-  hitEnemy(pos) { this.noise({ dur: 0.06, gain: 0.3, type: 'lowpass', freq: 900, pos }); this.tone({ freq: rand(200, 260), freqEnd: 120, dur: 0.1, gain: 0.15, type: 'square', pos }); }
-  headshot(pos) { this.noise({ dur: 0.05, gain: 0.5, type: 'highpass', freq: 3000, pos }); this.tone({ freq: 1500, freqEnd: 500, dur: 0.09, gain: 0.2, type: 'triangle', pos }); }
+  dash() { this.noise({ dur: 0.28, gain: 0.32, type: 'bandpass', freq: 600, freqEnd: 3000, q: 1.4, attack: 0.01, wet: 0.15 }); }
+  hurt() { this._thump(120, 50, 0.16, 0.5); this.noise({ dur: 0.15, gain: 0.3, type: 'lowpass', freq: 700, wet: 0.05 }); this.tone({ freq: 200, freqEnd: 110, dur: 0.18, gain: 0.12, type: 'triangle' }); }
+  death() { this.tone({ freq: 220, freqEnd: 30, dur: 1.2, gain: 0.35, type: 'triangle', wet: 0.4 }); this._thump(80, 25, 0.8, 0.6); this._tear(null, 0.8, 0.45); }
+  // hits on a doodle: a dull tap on the ink, with a little pen tick so you know it landed
+  hitEnemy(pos) { this.noise({ dur: 0.06, gain: 0.3, type: 'lowpass', freq: 1100, pos, wet: 0.05 }); this._thump(rand(180, 240), 90, 0.07, 0.3, pos); }
+  headshot(pos) { this._crack(0.45, pos, 3200); this.tone({ freq: 1500, freqEnd: 700, dur: 0.1, gain: 0.18, type: 'triangle', pos }); }
   // a kill: a short two-note ping over a thump, the kind of sound you want to hear again
-  kill(strong = false) { this.tone({ freq: 880, freqEnd: 880, dur: 0.07, gain: 0.22, type: 'square' }); this.tone({ freq: 1320, freqEnd: 1320, dur: 0.16, gain: 0.2, type: 'square', delay: 0.07 }); this.tone({ freq: 140, freqEnd: 50, dur: 0.16, gain: strong ? 0.6 : 0.35, type: 'sine' }); if (strong) this.tone({ freq: 1760, dur: 0.22, gain: 0.12, type: 'triangle', delay: 0.14 }); }
-  enemyDie(pos) {
-    this.tone({ freq: rand(160, 220), freqEnd: 40, dur: 0.4, gain: 0.3, type: 'sawtooth', pos });
-    this.noise({ dur: 0.3, gain: 0.4, type: 'lowpass', freq: 600, freqEnd: 100, pos });
-    this.noise({ dur: 0.12, gain: 0.3, type: 'bandpass', freq: 1400, q: 1, pos, delay: 0.03 });
-  }
-  gib(pos) { this.noise({ dur: 0.2, gain: 0.45, type: 'lowpass', freq: 500, freqEnd: 120, pos }); this.noise({ dur: 0.1, gain: 0.3, type: 'bandpass', freq: 2000, q: 0.8, pos, delay: 0.02 }); }
-  splat(pos) { this.noise({ dur: 0.08, gain: 0.15, type: 'lowpass', freq: 700, pos }); }
-  spawn(pos) { for (let i = 0; i < 5; i++) this.noise({ dur: 0.04, gain: 0.25, type: 'bandpass', freq: rand(2500, 5000), q: 2, pos, delay: i * 0.05 }); }
-  lunge(pos) { this.tone({ freq: 200, freqEnd: 700, dur: 0.3, gain: 0.25, type: 'sawtooth', pos }); }
-  bulletImpact(pos) { this.noise({ dur: 0.05, gain: 0.25, type: 'highpass', freq: 1500, pos }); }
-  ricochet(pos) { this.tone({ freq: rand(2000, 3500), freqEnd: 800, dur: 0.15, gain: 0.12, type: 'sine', pos }); }
-  pickup() { this.tone({ freq: 700, freqEnd: 1100, dur: 0.1, gain: 0.2, type: 'triangle' }); this.tone({ freq: 1100, freqEnd: 1500, dur: 0.15, gain: 0.2, type: 'triangle', delay: 0.09 }); }
-  wave() { const notes = [440, 554, 659, 880]; notes.forEach((f, i) => this.tone({ freq: f, dur: 0.22, gain: 0.18, type: 'triangle', delay: i * 0.11 })); }
-  waveClear() { const notes = [659, 880, 1108, 1318]; notes.forEach((f, i) => this.tone({ freq: f, dur: 0.3, gain: 0.16, type: 'triangle', delay: i * 0.13 })); }
+  kill(strong = false) { this.tone({ freq: 880, dur: 0.07, gain: 0.16, type: 'square', wet: 0.2 }); this.tone({ freq: 1320, dur: 0.18, gain: 0.15, type: 'square', delay: 0.07, wet: 0.25 }); this._thump(140, 50, 0.16, strong ? 0.6 : 0.35); if (strong) this.tone({ freq: 1760, dur: 0.3, gain: 0.1, type: 'triangle', delay: 0.14, wet: 0.4 }); }
+  // a doodle dying: it gets torn off the page
+  enemyDie(pos) { this._thump(rand(150, 210), 40, 0.3, 0.45, pos); this._tear(pos, rand(0.25, 0.4), 0.5, 0.02); }
+  gib(pos) { this.noise({ dur: 0.2, gain: 0.4, type: 'lowpass', freq: 600, freqEnd: 120, pos, wet: 0.1 }); this._tear(pos, 0.15, 0.3, 0.02); }
+  // no-gore stand-in for gib: a sheet of paper scrunched up, with a soft pop
+  crumple(pos) { this.noise({ dur: 0.16, gain: 0.3, type: 'bandpass', freq: 2600, freqEnd: 900, q: 0.8, pos, wet: 0.05 }); this.tone({ freq: 520, freqEnd: 240, dur: 0.08, gain: 0.12, type: 'triangle', pos }); }
+  splat(pos) { this.noise({ dur: 0.08, gain: 0.15, type: 'lowpass', freq: 700, pos, wet: 0.05 }); }
+  // a doodle being drawn into the world
+  spawn(pos) { this.scribble(pos, 0.3, 0.3); }
+  lunge(pos) { this.tone({ freq: 200, freqEnd: 700, dur: 0.3, gain: 0.22, type: 'sawtooth', pos }); this.scribble(pos, 0.25, 0.15); }
+  bulletImpact(pos) { this.noise({ dur: 0.05, gain: 0.25, type: 'bandpass', freq: rand(1500, 2800), q: 1, pos, wet: 0.2 }); }
+  ricochet(pos) { this.tone({ freq: rand(2000, 3500), freqEnd: 800, dur: 0.18, gain: 0.1, type: 'sine', pos, wet: 0.35 }); }
+  pickup() { this.tone({ freq: 700, freqEnd: 1100, dur: 0.1, gain: 0.18, type: 'triangle', wet: 0.2 }); this.tone({ freq: 1100, freqEnd: 1500, dur: 0.16, gain: 0.18, type: 'triangle', delay: 0.09, wet: 0.3 }); }
+  wave() { const notes = [440, 554, 659, 880]; notes.forEach((f, i) => this.tone({ freq: f, dur: 0.26, gain: 0.15, type: 'triangle', delay: i * 0.11, wet: 0.4 })); }
+  waveClear() { const notes = [659, 880, 1108, 1318]; notes.forEach((f, i) => this.tone({ freq: f, dur: 0.34, gain: 0.14, type: 'triangle', delay: i * 0.13, wet: 0.45 })); }
   tick() { this.noise({ dur: 0.02, gain: 0.2, type: 'highpass', freq: 4000 }); }
-  hitstop() { this.tone({ freq: 60, dur: 0.1, gain: 0.3, type: 'sine' }); }
-  switchWeapon() { this.noise({ dur: 0.05, gain: 0.25, type: 'bandpass', freq: 1800, q: 1.5 }); }
-  heartbeat() { this.tone({ freq: 55, dur: 0.15, gain: 0.35, type: 'sine' }); this.tone({ freq: 50, dur: 0.12, gain: 0.25, type: 'sine', delay: 0.18 }); }
+  hitstop() { this._thump(70, 40, 0.12, 0.35); }
+  switchWeapon() { this._click(0, 1800, 0.25); this._click(0.07, 2600, 0.15); }
+  heartbeat() { this.tone({ freq: 55, dur: 0.15, gain: 0.35, type: 'sine', wet: 0 }); this.tone({ freq: 50, dur: 0.12, gain: 0.25, type: 'sine', delay: 0.18, wet: 0 }); }
 
   // ---------- more weapons / movement ----------
   shotgunFire() {
-    this.noise({ dur: 0.32, gain: 0.9, type: 'lowpass', freq: 1800, freqEnd: 120 }); this.noise({ dur: 0.08, gain: 0.5, type: 'highpass', freq: 2500 });
-    this.tone({ freq: 110, freqEnd: 30, dur: 0.28, gain: 0.7, type: 'triangle' });
+    this._crack(0.7, null, 1500); this._thump(100, 28, 0.3, 0.95);
+    this._body(1200, 120, 0.34, 0.85, null, 0.5); this.noise({ dur: 0.6, gain: 0.16, type: 'lowpass', freq: 800, freqEnd: 120, delay: 0.03, wet: 0.7 });
   }
   revolver() {
-    this.noise({ dur: 0.22, gain: 0.85, type: 'bandpass', freq: 900, freqEnd: 180, q: 0.6 }); this.noise({ dur: 0.05, gain: 0.6, type: 'highpass', freq: 3000 });
-    this.tone({ freq: 200, freqEnd: 35, dur: 0.22, gain: 0.7, type: 'sawtooth' }); this.tone({ freq: 2600, freqEnd: 900, dur: 0.12, gain: 0.12, type: 'sine' });
+    this._crack(0.65, null, 2600); this._thump(190, 40, 0.2, 0.85);
+    this._body(950, 180, 0.24, 0.75, null, 0.6); this.tone({ freq: 2600, freqEnd: 900, dur: 0.14, gain: 0.08, type: 'sine', wet: 0.4 });
   }
   sniperFire() {
-    this.noise({ dur: 0.45, gain: 0.95, type: 'bandpass', freq: 1400, freqEnd: 90, q: 0.5 });
-    this.noise({ dur: 0.07, gain: 0.7, type: 'highpass', freq: 3500 });
-    this.tone({ freq: 260, freqEnd: 30, dur: 0.4, gain: 0.8, type: 'sawtooth' });
-    this.tone({ freq: 1800, freqEnd: 400, dur: 0.5, gain: 0.16, type: 'sine', delay: 0.05 });
+    this._crack(0.85, null, 3200); this._thump(120, 26, 0.45, 1.0);
+    this._body(1500, 90, 0.5, 0.9, null, 0.45); this.noise({ dur: 1.1, gain: 0.18, type: 'lowpass', freq: 700, freqEnd: 90, delay: 0.04, wet: 0.8 });
+    this.tone({ freq: 1800, freqEnd: 400, dur: 0.5, gain: 0.1, type: 'sine', delay: 0.05, wet: 0.5 });
   }
-  focusIn() { this.tone({ freq: 1200, freqEnd: 420, dur: 0.45, gain: 0.3, type: 'sine' }); this.noise({ dur: 0.35, gain: 0.2, type: 'bandpass', freq: 2400, freqEnd: 500, q: 1.2 }); }
-  focusSlash() { this.noise({ dur: 0.3, gain: 0.55, type: 'bandpass', freq: 600, freqEnd: 4000, q: 1.2 }); this.tone({ freq: 180, freqEnd: 60, dur: 0.3, gain: 0.55, type: 'triangle' }); for (const f of [1600, 2400]) this.tone({ freq: f, freqEnd: f * 0.6, dur: 0.35, gain: 0.14, type: 'sine', delay: 0.04 }); }
-  pump() { this.noise({ dur: 0.05, gain: 0.35, type: 'bandpass', freq: 1500, q: 1.5 }); this.noise({ dur: 0.06, gain: 0.35, type: 'bandpass', freq: 900, q: 1.5, delay: 0.09 }); }
-  shell() { this.noise({ dur: 0.04, gain: 0.3, type: 'highpass', freq: 2500 }); this.tone({ freq: 1400, freqEnd: 900, dur: 0.05, gain: 0.08, type: 'square' }); }
-  cylinder() { this.noise({ dur: 0.05, gain: 0.3, type: 'highpass', freq: 2000 }); this.tone({ freq: 700, freqEnd: 400, dur: 0.12, gain: 0.1, type: 'square', delay: 0.05 }); this.noise({ dur: 0.06, gain: 0.35, type: 'highpass', freq: 1800, delay: 1.6 }); }
-  explosion(pos) { this.noise({ dur: 0.7, gain: 0.9, type: 'lowpass', freq: 900, freqEnd: 60, pos }); this.tone({ freq: 80, freqEnd: 25, dur: 0.6, gain: 0.7, type: 'triangle', pos }); this.noise({ dur: 0.15, gain: 0.4, type: 'bandpass', freq: 3000, q: 0.7, pos }); }
-  fuse(pos) { this.noise({ dur: 0.12, gain: 0.25, type: 'highpass', freq: 5000, pos }); }
-  flyerDive(pos) { this.tone({ freq: 900, freqEnd: 300, dur: 0.35, gain: 0.2, type: 'sawtooth', pos }); this.noise({ dur: 0.3, gain: 0.15, type: 'bandpass', freq: 2500, freqEnd: 800, q: 1, pos }); }
+  focusIn() { this.tone({ freq: 1200, freqEnd: 420, dur: 0.45, gain: 0.25, type: 'sine', wet: 0.5 }); this.noise({ dur: 0.35, gain: 0.18, type: 'bandpass', freq: 2400, freqEnd: 500, q: 1.2, wet: 0.4 }); }
+  focusSlash() { this.noise({ dur: 0.3, gain: 0.5, type: 'bandpass', freq: 600, freqEnd: 4000, q: 1.6, attack: 0.02 }); this._thump(180, 50, 0.3, 0.6); this._tear(null, 0.3, 0.4, 0.05); for (const f of [1600, 2400]) this.tone({ freq: f, freqEnd: f * 0.6, dur: 0.4, gain: 0.1, type: 'sine', delay: 0.04, wet: 0.5 }); }
+  pump() { this._click(0, 1500, 0.35); this.noise({ dur: 0.06, gain: 0.2, type: 'lowpass', freq: 700, delay: 0.04, wet: 0.05 }); this._click(0.1, 950, 0.38); }
+  shell() { this._click(0, 2500, 0.25); this.tone({ freq: vary(1400), freqEnd: 900, dur: 0.06, gain: 0.06, type: 'triangle' }); }
+  cylinder() { this._click(0, 2000, 0.3); this.tone({ freq: 700, freqEnd: 400, dur: 0.12, gain: 0.08, type: 'triangle', delay: 0.05 }); this._click(1.6, 1800, 0.35); }
+  // grenades: a crack, a deep clipped boom, debris and a long tail rolling round the streets
+  explosion(pos) {
+    this._crack(0.8, pos, 1200); this._thump(75, 22, 0.9, 1.1, pos);
+    this.noise({ dur: 0.9, gain: 0.85, type: 'lowpass', freq: 1400, freqEnd: 60, pos, attack: 0.002, wet: 0.5 });
+    this.noise({ dur: 1.8, gain: 0.22, type: 'lowpass', freq: 500, freqEnd: 50, pos, delay: 0.05, wet: 0.9 });
+    for (let i = 0; i < 6; i++) this.noise({ dur: rand(0.03, 0.08), gain: rand(0.08, 0.18), type: 'bandpass', freq: rand(1500, 4500), q: 2, pos, delay: 0.15 + rand(0, 0.5), wet: 0.3 });
+  }
+  fuse(pos) { this.noise({ dur: 0.12, gain: 0.22, type: 'highpass', freq: 5000, pos }); }
+  flyerDive(pos) { this.tone({ freq: 900, freqEnd: 300, dur: 0.35, gain: 0.18, type: 'sawtooth', pos }); this.noise({ dur: 0.3, gain: 0.15, type: 'bandpass', freq: 2500, freqEnd: 800, q: 1, pos }); }
   flyerBuzz(pos) { this.tone({ freq: rand(380, 460), dur: 0.14, gain: 0.05, type: 'sawtooth', pos }); }
-  stomp(pos) { this.noise({ dur: 0.4, gain: 0.8, type: 'lowpass', freq: 400, freqEnd: 60, pos }); this.tone({ freq: 60, freqEnd: 25, dur: 0.5, gain: 0.7, type: 'sine', pos }); }
-  bossRoar(pos) { this.tone({ freq: 90, freqEnd: 60, dur: 0.9, gain: 0.5, type: 'sawtooth', pos }); this.noise({ dur: 0.8, gain: 0.4, type: 'bandpass', freq: 500, q: 0.8, pos }); }
-  shieldHit(pos) { this.tone({ freq: rand(600, 800), freqEnd: 300, dur: 0.12, gain: 0.2, type: 'square', pos }); this.noise({ dur: 0.05, gain: 0.3, type: 'highpass', freq: 3000, pos }); }
-  airdrop() { this.tone({ freq: 660, dur: 0.15, gain: 0.15, type: 'triangle' }); this.tone({ freq: 880, dur: 0.2, gain: 0.15, type: 'triangle', delay: 0.15 }); }
-  crateLand(pos) { this.noise({ dur: 0.3, gain: 0.6, type: 'lowpass', freq: 500, freqEnd: 80, pos }); }
+  stomp(pos) { this._thump(60, 22, 0.55, 0.9, pos); this.noise({ dur: 0.45, gain: 0.6, type: 'lowpass', freq: 450, freqEnd: 60, pos, wet: 0.4 }); }
+  bossRoar(pos) { this.tone({ freq: 90, freqEnd: 60, dur: 1.0, gain: 0.45, type: 'sawtooth', pos, wet: 0.5 }); this.tone({ freq: 45, freqEnd: 32, dur: 1.0, gain: 0.4, type: 'sine', pos, drive: true, wet: 0.2 }); this.noise({ dur: 0.9, gain: 0.35, type: 'bandpass', freq: 500, q: 0.8, pos, wet: 0.5 }); }
+  shieldHit(pos) { this.tone({ freq: rand(600, 800), freqEnd: 300, dur: 0.14, gain: 0.18, type: 'square', pos, wet: 0.3 }); this._crack(0.3, pos, 3000); }
+  airdrop() { this.tone({ freq: 660, dur: 0.15, gain: 0.15, type: 'triangle', wet: 0.3 }); this.tone({ freq: 880, dur: 0.22, gain: 0.15, type: 'triangle', delay: 0.15, wet: 0.4 }); }
+  crateLand(pos) { this._thump(80, 30, 0.3, 0.6, pos); this.noise({ dur: 0.3, gain: 0.5, type: 'lowpass', freq: 600, freqEnd: 80, pos, wet: 0.3 }); }
   // ---------- music: an 8-bit theme, two pulse voices, a triangle bass, an arpeggio and drums ----------
   musicOn(on) {
     if (!this.ctx) return;
-    if (on && !this._mus) { this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0.05; this.musicGain.connect(this.master); this._mus = { step: 0, next: this.ctx.currentTime + 0.1, timer: setInterval(() => this._musicTick(), 100) }; }
+    if (on && !this._mus) { this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0.05; if (!this.musicTone) { this.musicTone = this.ctx.createBiquadFilter(); this.musicTone.type = 'lowpass'; this.musicTone.frequency.value = 5200; this.musicTone.Q.value = 0.4; const mv = this.ctx.createGain(); mv.gain.value = 0.25; this.musicTone.connect(this.master); this.musicTone.connect(mv); mv.connect(this.verbIn); } this.musicGain.connect(this.musicTone); this._mus = { step: 0, next: this.ctx.currentTime + 0.1, timer: setInterval(() => this._musicTick(), 100) }; }
     else if (!on && this._mus) { clearInterval(this._mus.timer); this._mus = null; if (this.musicGain) this.musicGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2); }
   }
   get musicPlaying() { return !!this._mus; }
@@ -234,7 +295,7 @@ class Sfx {
     }
   }
   // something made of clay, wood or paper giving way
-  smash(pos, big = false) { this.noise({ dur: big ? 0.28 : 0.14, gain: big ? 0.7 : 0.45, type: 'lowpass', freq: big ? 900 : 1600, freqEnd: 200, pos }); this.noise({ dur: 0.05, gain: 0.35, type: 'highpass', freq: 3500, pos }); this.tone({ freq: big ? 120 : 220, freqEnd: 60, dur: 0.12, gain: 0.25, type: 'triangle', pos }); }
+  smash(pos, big = false) { this.noise({ dur: big ? 0.28 : 0.14, gain: big ? 0.7 : 0.45, type: 'lowpass', freq: big ? 900 : 1600, freqEnd: 200, pos, wet: 0.25 }); this._crack(0.3, pos, 3500); this._thump(big ? 120 : 220, 60, 0.12, 0.3, pos); for (let i = 0; i < (big ? 5 : 3); i++) this.noise({ dur: rand(0.03, 0.07), gain: rand(0.08, 0.16), type: 'bandpass', freq: rand(1200, 3500), q: 2, pos, delay: 0.05 + rand(0, 0.25), wet: 0.2 }); }
   _noiseAt(t0, dur, gain, type, freq, out) {
     const ctx = this.ctx; const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true; src.loopEnd = 2;
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; const env = ctx.createGain();

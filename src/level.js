@@ -2,22 +2,47 @@
 // axis-aligned box colliders, which is what the navigation grid is generated from.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { makeInkMaterial, INK } from './render.js';
+import { makeInkMaterial, INK, WASH } from './render.js';
 import { rand, choose, TAU } from './util.js';
 import { buildHumanoid } from './enemies.js';
+import { t } from './i18n.js';
 
-// Doodle Mexico is built and kept, but off the menu until it is ready; flip this to offer it again
-export const MEXICO_READY = false;
-export const LEVELS = [{ key: 'district', name: '涂鸦街区', blurb: '街道、屋顶与消防梯' }, ...(MEXICO_READY ? [{ key: 'mexico', name: '涂鸦墨西哥', blurb: '阳光烘烤的广场 · 皮纳塔、塔可和马里亚奇乐队' }] : [])];
+// The second map (shown to players as Doodle Plaza; 'mexico' inside the code). Set false to take it off the menu.
+export const MEXICO_READY = true;
+export const LEVELS = [{ key: 'district', name: t('map.district'), blurb: t('map.district.blurb') }, ...(MEXICO_READY ? [{ key: 'mexico', name: t('map.mexico'), blurb: t('map.mexico.blurb') }] : [])];
 
 function createBuilder(scene, world) {
   const geos = {}; const L = { rings: [], spawns: [], snipers: [], pickups: [], animated: [], meshes: [], playerStart: new THREE.Vector3(0, 0, 42), bounds: { minX: -55, maxX: 55, minZ: -55, maxZ: 55 }, arenaSpawns: [], grappleMovers: [], breakables: [], key: 'district' };
-  const addGeo = (g, ink) => (geos[ink] || (geos[ink] = [])).push(g);
+  // every piece gets a watercolour wash, picked from its size and place: the ground, the outer walls,
+  // roofs and paving, small props, and buildings, which share a colour per 16 m block so one building
+  // mostly reads as one colour. Coloured inks keep their own tint (the post pass does that).
+  const washOf = (g, ink) => {
+    g.computeBoundingBox(); const b = g.boundingBox;
+    const sx = b.max.x - b.min.x, sy = b.max.y - b.min.y, sz = b.max.z - b.min.z;
+    const cx = (b.min.x + b.max.x) / 2, cy = (b.min.y + b.max.y) / 2, cz = (b.min.z + b.max.z) / 2;
+    if (cy > 45) return Math.hypot(cx + 90, cy - 110, cz + 160) < 30 ? WASH.SUN : WASH.CLOUD;
+    if (Math.max(sx, sz) > 150 || ink !== INK.BLUE) return WASH.NONE;
+    if (b.max.y <= 0.05 && sx * sz > 400) return WASH.GROUND;
+    if (sy > 12 && Math.max(sx, sz) > 60) return WASH.OUTER;
+    if ((Math.min(sx, sz) < 0.2 && sy > 0.5) || Math.max(sx, sy, sz) < 0.35) return WASH.NONE;
+    if (sy < 0.7 && sx * sz > 6) return cy > 3 ? WASH.ROOF : WASH.PAVING;
+    if (sx * sy * sz < 4) return WASH.PROP;
+    const h = Math.abs((Math.floor(cx / 16) * 73856093) ^ (Math.floor(cz / 16) * 19349663)) % 6;
+    return WASH.BUILD + h;
+  };
+  const addGeo = (g, ink) => {
+    const w = washOf(g, ink), n = g.attributes.position.count;
+    g.setAttribute('wash', new THREE.BufferAttribute(new Float32Array(n).fill(w), 1));
+    (geos[ink] || (geos[ink] = [])).push(g);
+  };
   const collider = (x, y, z, w, h, d, o = {}) => world.addBox({ x: x - w / 2, y, z: z - d / 2 }, { x: x + w / 2, y: y + h, z: z + d / 2 }, { noNav: !!o.noNav, noShoot: !!o.noShoot, noGrapple: !!o.noGrapple, tag: o.tag });
   function box(x, y, z, w, h, d, o = {}) {
     const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y + h / 2, z); addGeo(g, o.ink ?? INK.BLUE);
     if (!o.noCollide) collider(x, y, z, w, h, d, o);
   }
+  // paint on a surface: a flat sheet a hair above it. A raised strip a couple of centimetres thick
+  // was thinner than a pixel from most places, so its sides and outline flickered in and out.
+  const decal = (x, y, z, w, d, ink) => { const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate(x, y + 0.012, z); addGeo(g, ink); };
   const slab = (x1, z1, x2, z2, y, t, o = {}) => box((x1 + x2) / 2, y - t, (z1 + z2) / 2, x2 - x1, t, z2 - z1, o); // top surface at y
   // Wall pieces along an axis with rectangular gaps [a1, a2, yBottom = 0, yTop = h]; gaps may overlap.
   function wallPieces(a1, a2, h, gaps) {
@@ -96,12 +121,12 @@ function createBuilder(scene, world) {
       L.animated.push({ mesh: m, update: (t) => { const a = t * sp + ph; m.position.set(Math.cos(a) * r, h + Math.sin(a * 2.3) * 3, Math.sin(a) * r * 0.7); m.lookAt(Math.cos(a + 0.05) * r, h + Math.sin((a + 0.05) * 2.3) * 3, Math.sin(a + 0.05) * r * 0.7); m.rotateZ(Math.sin(a * 3) * 0.6); } });
     }
   }
-  return { L, addGeo, collider, box, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, finish, planes, scene, world };
+  return { L, addGeo, collider, box, slab, decal, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, finish, planes, scene, world };
 }
 
 // ============================ map 1: Doodle District ============================
 function buildDistrict(B, arena = false) {
-  const { L, box, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, planes, addGeo, collider } = B;
+  const { L, box, slab, decal, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, planes, addGeo, collider } = B;
   // ---------------- ground + perimeter ----------------
   // solo keeps the tight old block; a match gets a far wider arena, a dome and a hanging playground
   const P = arena ? 68 : 55, T = 6, PH = arena ? 30 : 18, E = P - 3.8, D = P - 3;
@@ -205,7 +230,7 @@ function buildDistrict(B, arena = false) {
     // ruler bridge from the A roof: to the tower's third floor in solo, right across to building B in a match (y=12)
     { const bx2 = arena ? 24.2 : -7; const len = bx2 + 25.2;
       box((bx2 - 25.2) / 2, 11.6, 6, len, 0.4, 2.4, { ink: INK.ORANGE });
-      for (let i = 0; i <= Math.floor(len); i++) box(-25 + i, 12, 5, 0.06, 0.02, i % 5 === 0 ? 0.6 : 0.35, { noCollide: true, ink: INK.BLACK });
+      for (let i = 0; i <= Math.floor(len); i++) decal(-25 + i, 12, 5, 0.06, i % 5 === 0 ? 0.6 : 0.35, INK.BLACK);
       rail(-25, 7.2, bx2, 7.2, 12, { ink: INK.ORANGE }); if (arena) rail(-25, 4.8, bx2, 4.8, 12, { ink: INK.ORANGE }); }
     
     spawn(-34, 12, 12); spawn(-40, 0, 18); sniper(-27, 12, 6); pickup(-34, 4, 12); pickup(-30, 12, 16); pickup(-40, 8, 8);
@@ -253,7 +278,7 @@ function buildDistrict(B, arena = false) {
     stairs(-46.5, 0, z + 5.5, '+x', 25, 2, { rise: 0.28, run: 0.45 }); stairs(46.5, 0, z + 5.5, '-x', 25, 2, { rise: 0.28, run: 0.45 });
     
     // road markings
-    for (let x = -50; x < 50; x += 4) box(x + 1, y, z, 2, 0.02, 0.2, { noCollide: true, ink: INK.BLACK });
+    for (let x = -50; x < 50; x += 4) decal(x + 1, y, z, 2, 0.2, INK.BLACK);
     spawn(-48, y, z); spawn(48, y, z); sniper(0, y, z); pickup(-10, y, z); pickup(24, y, z);
   }
 

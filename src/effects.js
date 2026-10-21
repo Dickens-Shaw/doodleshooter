@@ -9,6 +9,11 @@ const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.
 const _t1 = new THREE.Vector3(), _t2 = new THREE.Vector3(), _dt1 = new THREE.Vector3(), _dt2 = new THREE.Vector3(), _off = new THREE.Vector3(), _pc = new THREE.Vector3(), _ps = new THREE.Vector3(), _pd = new THREE.Vector3(), _mtx = new THREE.Matrix4();
 const _up = new THREE.Vector3(0, 1, 0), _z = new THREE.Vector3(0, 0, 1), _down = new THREE.Vector3(0, -1, 0);
 
+// Gore switch. Off (the default, PEGI 12): hits throw a puff of black ink that leaves no marks, nobody
+// loses a head or a limb, no pools, and bodies are erased off the page a few seconds after they fall.
+// On: the original red splatter, pools and dismemberment.
+export const GORE = false;
+
 function splatGeometry(seed) {
   const pts = []; const n = 20;
   const r0 = 0.42 + 0.1 * ((seed * 7) % 3) / 3;
@@ -36,7 +41,19 @@ export class Effects {
     this.splats = [0, 1, 2, 3, 4].map((i) => this._pool(splatGeometry(i), 300, true));
     this.holes = this._pool(new THREE.CircleGeometry(0.5, 8), 260, true);
     this.particles = []; this.debrisList = []; this.growing = []; this.shakeAmt = 0;
-    this.gibsAlive = 0;
+    this.gibsAlive = 0; this.maxDebris = 70; this._budget = -1;
+  }
+  // Lower graphics tiers keep fewer marks and loose pieces around: slow machines (a 4 GB Chromebook)
+  // pay for every splat on the walls each frame. Called with the effects tier 0/1/2; only changes act.
+  setBudget(q) {
+    if (q === this._budget) return; this._budget = q;
+    const f = [0.4, 0.7, 1][q] ?? 1; this.maxDebris = [30, 50, 70][q] ?? 70;
+    for (const p of [this.holes, ...this.splats]) {
+      p.limit = Math.max(16, Math.round(p.max * f));
+      if (p.used > p.limit) { p.used = p.limit; p.mesh.count = p.used; }
+      p.next %= p.limit;
+    }
+    while (this.debrisList.length > this.maxDebris) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); if (old.blood) this.gibsAlive--; }
   }
   _pool(geo, max, double = false) {
     const mat = makeInkMaterial({ ink: INK.RED, fill: true, side: double ? THREE.DoubleSide : THREE.FrontSide });
@@ -50,7 +67,7 @@ export class Effects {
     _m.compose(pos, quat, scale); pool.mesh.setMatrixAt(i, _m);
     const c = pool.mesh.instanceColor.array; c[i * 3] = ink; c[i * 3 + 1] = fill ? 1 : 0; c[i * 3 + 2] = 0;
   }
-  _alloc(pool) { const i = pool.next; pool.next = (pool.next + 1) % pool.max; pool.used = Math.min(pool.used + 1, pool.max); pool.mesh.count = pool.used; return i; }
+  _alloc(pool) { const n = pool.limit || pool.max, i = pool.next; pool.next = (pool.next + 1) % n; pool.used = Math.min(pool.used + 1, n); pool.mesh.count = pool.used; return i; }
   clear() {
     this.particles.length = 0; this.growing.length = 0;
     for (const d of this.debrisList) this.scene.remove(d.mesh); this.debrisList.length = 0;
@@ -153,6 +170,7 @@ export class Effects {
   // ---------- blood ----------
   blood(pos, dir, amount = 1, opts = {}) {
     const ink = opts.ink ?? INK.RED;
+    if (!GORE && (ink === INK.RED || ink === INK.BLACK)) { this.inkPuff(pos, dir, amount); return; }
     const n = Math.round(14 * amount);
     for (let i = 0; i < n; i++) {
       _v.copy(dir).multiplyScalar(rand(1, 6)).add(_v2.set(rand(-1, 1), rand(-0.5, 1.2), rand(-1, 1)).multiplyScalar(rand(1, 4.5)));
@@ -169,8 +187,39 @@ export class Effects {
       this._spawn('drop', pos, _v, { size: rand(0.012, 0.03), life: rand(0.3, 0.7), ink, collide: null, gravity: 6, drag: 2 });
     }
   }
+  // a hit without gore: a small puff of black ink dots and pen flicks that vanish in the air
+  inkPuff(pos, dir, amount = 1) {
+    const n = Math.round(7 * amount);
+    for (let i = 0; i < n; i++) {
+      _v.copy(dir).multiplyScalar(rand(0.5, 3)).add(_v2.set(rand(-1, 1), rand(-0.3, 1.2), rand(-1, 1)).multiplyScalar(rand(0.8, 2.5)));
+      this._spawn('drop', pos, _v, { size: rand(0.02, 0.05), life: rand(0.25, 0.5), ink: INK.BLACK, collide: null, gravity: 12, drag: 2.5 });
+    }
+    const m = Math.round(4 * amount);
+    for (let i = 0; i < m; i++) {
+      _v.copy(dir).multiplyScalar(rand(3, 8)).add(_v2.set(rand(-1, 1), rand(-0.3, 1), rand(-1, 1)).multiplyScalar(rand(1, 3)));
+      this._spawn('stroke', pos, _v, { size: rand(0.015, 0.03), life: rand(0.15, 0.3), ink: INK.BLACK, collide: null, gravity: 6, stretch: 0.05, drag: 3 });
+    }
+  }
+  // cartoon knock-out: a ring of orange stars spinning off the head
+  dizzy(pos) {
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * TAU; _d.set(Math.cos(a), 0, Math.sin(a));
+      _v.set(-_d.z, 0, _d.x).multiplyScalar(2.5).addScaledVector(_d, 1.2); _v.y = rand(1, 1.8);
+      this._spawn('drop', _v2.copy(pos).addScaledVector(_d, 0.28), _v, { size: rand(0.06, 0.09), life: rand(0.55, 0.8), ink: INK.ORANGE, gravity: 1.5, drag: 2.5, collide: null });
+    }
+    this.strokeBurst(pos, INK.ORANGE, 10, 5, { life: 0.35, size: 0.025 });
+  }
+  // a figure rubbed off the page: pencil flicks and a few curls of paper
+  erase(pos, n = 14) {
+    this.strokeBurst(pos, INK.BLUE, n, 4, { life: 0.45, size: 0.02, gravity: 3 });
+    for (let i = 0; i < n / 2; i++) {
+      _v.set(rand(-1, 1), rand(0.3, 1.2), rand(-1, 1)).multiplyScalar(rand(1, 3));
+      this._spawn('drop', pos, _v, { size: rand(0.03, 0.06), life: rand(0.5, 0.9), ink: INK.BLACK, fill: false, gravity: 4, drag: 2, collide: null });
+    }
+  }
   // a fat bead of ink running off a blade
   drip(pos, amount = 1) {
+    if (!GORE) return;
     this._spawn('drop', pos, _v.set(rand(-0.3, 0.3), rand(-0.4, 0.2), rand(-0.3, 0.3)), { size: rand(0.018, 0.03) + 0.02 * amount, life: rand(1, 1.8), ink: INK.RED, collide: 'decal', gravity: 20, decalSize: 5 });
   }
   // Grenade blast: a fat orange fireball of overlapping blobs, a thick ring of strokes thrown
@@ -225,9 +274,9 @@ export class Effects {
   // ---------- rigid debris (gibs, dropped weapons) ----------
   debris(mesh, pos, vel, angVel, o = {}) {
     mesh.position.copy(pos); this.scene.add(mesh);
-    const d = { mesh, vel: vel.clone(), ang: angVel.clone(), life: o.life ?? 10, radius: o.radius ?? 0.18, blood: o.blood ?? false, rest: false, bloodT: 0, bounces: 0, baseScale: mesh.scale.x };
+    const d = { mesh, vel: vel.clone(), ang: angVel.clone(), life: o.life ?? 10, radius: o.radius ?? 0.18, blood: GORE && (o.blood ?? false), erase: o.erase ?? false, erased: false, rest: false, bloodT: 0, bounces: 0, baseScale: mesh.scale.x };
     this.debrisList.push(d); if (d.blood) this.gibsAlive++;
-    if (this.debrisList.length > 70) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); if (old.blood) this.gibsAlive--; }
+    if (this.debrisList.length > this.maxDebris) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); if (old.blood) this.gibsAlive--; }
     return d;
   }
 
@@ -290,6 +339,7 @@ export class Effects {
         if (m.position.y < -8) d.life = 0;
       }
       d.life -= dt;
+      if (d.erase && !d.erased && d.life < 0.6) { d.erased = true; this.erase(_v.copy(m.position).add(_v2.set(0, 0.6, 0))); }
       if (d.life < 0.6) m.scale.setScalar(Math.max(0.001, d.life / 0.6) * d.baseScale);
       if (d.life <= 0) { this.scene.remove(m); if (d.blood) this.gibsAlive--; ds.splice(i, 1); }
     }

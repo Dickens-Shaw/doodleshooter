@@ -8,6 +8,7 @@ const NO_GRAPPLE = (b) => !!b.data.noGrapple;
 const STAM_FIRE = 0.09, STAM_DRAIN = 0.08, STAM_GROUND = 0.4, STAM_AIR = 0.2, STAM_MIN = 0.18, STAM_PAUSE = 0.5, PARRY_WINDOW = 0.55;
 import { clamp, damp, rand, Spring, alignYAxis } from './util.js';
 import { audio } from './audio.js';
+import { t } from './i18n.js';
 
 const G = 26, WALK = 6.6, SPRINT = 10.6, CROUCH = 3.6, ACCEL = 140, FRICTION = 8, AIR_ACCEL = 36, AIR_CAP = 7.5, JUMP = 9.6;
 const STAND_H = 1.75, CROUCH_H = 1.05, EYE_STAND = 1.6, EYE_CROUCH = 0.88;
@@ -63,9 +64,9 @@ export class Player {
   }
   addAmmoAll(frac = 0.5) { for (const w of this.weapons) if (w.isGun) w.addAmmo(Math.round(w.maxReserve * frac)); }
   takeDamage(amount, fromPos) {
-    if (!this.alive) return;
+    if (!this.alive || this.shieldT > 0) return;
     this.hp -= amount; this.lastDamageT = 0; this.hurtFx = Math.min(1, this.hurtFx + amount / 40);
-    this.ctx.effects.shakeAmt += 0.2 + amount / 80; audio.hurt(); this.ctx.input.rumble(0.8, 0.5, 160);
+    this.ctx.effects.shakeAmt += 0.2 + amount / 80; audio.hurt();
     if (fromPos) { _v.subVectors(fromPos, this.eye); const x = _v.dot(this.right), f = _v.dot(this.forward); this.ctx.hud.damageFrom(Math.atan2(x, f)); }
     if (this.hp <= 0) { this.hp = 0; this.die(); }
   }
@@ -86,10 +87,9 @@ export class Player {
     this.weapon.onDeflect(perfect);
     if (perfect) audio.perfectParry(); else audio.parry();
     ctx.effects.sparks(proj.pos, _v2.copy(proj.vel).normalize().negate(), INK.ORANGE, perfect ? 14 : 8, 10);
-    ctx.effects.strokeBurst(proj.pos, INK.BLUE, perfect ? 8 : 5, 4.5, { life: 0.2, size: 0.028 });
-    ctx.input.rumble(0.4, 0.6, 70); ctx.game.hitstop(perfect ? 0.07 : 0.025, 0.18);
+    ctx.effects.strokeBurst(proj.pos, INK.BLUE, perfect ? 8 : 5, 4.5, { life: 0.2, size: 0.028 }); ctx.game.hitstop(perfect ? 0.07 : 0.025, 0.18);
     ctx.effects.shakeAmt += 0.06; this.flashFx = perfect ? 0.35 : 0.1;
-    ctx.game.addScore(perfect ? 60 : 15, perfect ? '完美招架' : '格挡成功');
+    ctx.game.addScore(perfect ? 60 : 15, perfect ? t('pts.perfectParry') : t('pts.block'));
     return { perfect, ret };
   }
   get parryWindow() { return this.isBlocking && this.blockHeld < PARRY_WINDOW; }
@@ -98,7 +98,7 @@ export class Player {
     _v.subVectors(e.center, this.eye).normalize(); if (_v.dot(this.forward) < 0.35) return false;
     this.weapon.onDeflect(true); audio.parry(); this.ctx.game.hitstop(0.06, 0.15);
     this.ctx.effects.sparks(_v2.copy(this.eye).addScaledVector(this.forward, 0.8), this.forward.clone().negate(), INK.ORANGE, 12, 8);
-    this.ctx.game.addScore(40, '格挡成功'); this.ctx.input.rumble(0.6, 0.6, 100); return true;
+    this.ctx.game.addScore(40, t('pts.block')); return true;
   }
   die() { this.alive = false; this.deathT = 0; audio.death(); this.detachGrapple(false); this.ctx.game.onPlayerDeath(); }
   idleCam(t) {
@@ -131,7 +131,7 @@ export class Player {
     // ---- movement input ----
     const mv = inp.move; this._mv = mv;
     const wish = _v.set(0, 0, 0).addScaledVector(_fwd, mv.y).addScaledVector(_right, mv.x); let wishLen = wish.length(); if (wishLen > 1e-4) wish.divideScalar(wishLen); wishLen = Math.min(1, wishLen);
-    if (inp.usingGamepad) { if (inp.pressed('sprint')) this.sprintToggle = !this.sprintToggle; if (mv.y < 0.1) this.sprintToggle = false; } else this.sprintToggle = inp.down('sprint');
+    this.sprintToggle = inp.down('sprint');
     const aiming = this._aiming = inp.down('aim') && this.weapon.isGun;
     const hspeed = Math.hypot(b.vel.x, b.vel.z);
     const crouchDown = inp.down('crouch');
@@ -185,19 +185,23 @@ export class Player {
     }
     if ((inp.pressed('dash') || (inp.pressed('crouch') && !b.onGround)) && !b.onGround && this.dashCd <= 0 && this.grapple.state !== 'on') this._dash(wishLen > 0 ? wish : _fwd);
     // ---- gravity, grapple, mantle, integrate ----
-    b.vel.y -= G * this.gravityScale * (this.grapple.state === 'on' ? 0.88 : 1) * dt;
+    // gravity goes on in two halves around the move (velocity Verlet), so a jump peaks at the same
+    // height whatever the frame rate; a single step before the move loses ~3% of it at 60 Hz
+    const gHalf = 0.5 * G * this.gravityScale * (this.grapple.state === 'on' ? 0.88 : 1) * dt;
+    b.vel.y -= gHalf;
     this._updateGrapple(dt);
     if (!b.onGround && this.mantleCd <= 0 && mv.y > 0.3 && b.vel.y < 8 && this.grapple.state !== 'on') this._tryMantle(_fwd);
     b.noSnap = this.grapple.state === 'on' || b.vel.y > 0.5;
     const spd = b.vel.length(); if (spd > 48) b.vel.multiplyScalar(48 / spd);
     ctx.world.moveBody(b, dt);
+    if (!b.onGround) b.vel.y -= gHalf;
     if (b.pos.y < -12 || Math.abs(b.pos.x) > 95 || Math.abs(b.pos.z) > 95) {
       this.detachGrapple(false); b.pos.copy(ctx.level.playerStart); b.vel.set(0, 0, 0); this.takeDamage(20, null); if (this.onFall) this.onFall();
-      ctx.hud.message('掉出纸面', '已在起点重新绘制', 1.8);
+      ctx.hud.message(t('fell.title'), t('fell.sub'), 1.8);
     }
     if (b.onGround && !this.lastGround) {
       const impact = clamp(-b.landVel / 14, 0, 1.5); this.landDip.kick(-impact * 6 - 0.5); audio.land(impact);
-      if (impact > 0.8) { ctx.effects.shakeAmt += impact * 0.15; ctx.input.rumble(impact * 0.4, 0.2, 80); }
+      if (impact > 0.8) { ctx.effects.shakeAmt += impact * 0.15; }
       if (Math.hypot(b.vel.x, b.vel.z) > 9) this.landGraceT = 0.4;
     }
     this.lastGround = b.onGround;
@@ -208,7 +212,7 @@ export class Player {
     this.stamPause -= dt;
     if (this.grapple.state !== 'idle') this.grapStam -= STAM_DRAIN * dt; else if (this.stamPause <= 0) this.grapStam += (b.onGround ? STAM_GROUND : STAM_AIR) * dt;
     this.grapStam = clamp(this.grapStam, 0, 1);
-    if (this.grapple.state === 'on' && this.grapStam <= 0) { this.detachGrapple(false); ctx.hud.tip('喘不过气了 · 落地恢复体力', 1.4); }
+    if (this.grapple.state === 'on' && this.grapStam <= 0) { this.detachGrapple(false); ctx.hud.tip(t('tip.winded'), 1.4); }
     const hs2 = Math.hypot(b.vel.x, b.vel.z); const moving = b.onGround && hs2 > 0.6 && !this.sliding;
     this.bobAmt = damp(this.bobAmt, moving ? clamp(hs2 / 7, 0.3, 1.4) : 0, 8, dt);
     if (moving) { this.bobPhase += dt * (7 + hs2 * 0.5); this.stepDist += hs2 * dt; if (this.stepDist > (sprinting ? 2.5 : 2.0)) { this.stepDist = 0; audio.footstep(clamp(hs2 / 8, 0.3, 1)); } }
@@ -242,7 +246,7 @@ export class Player {
     if (remote) { pos = new THREE.Vector3().fromArray(remote.pos); vel = new THREE.Vector3().fromArray(remote.vel); }
     else {
       this.grenades--; this.nadeCd = 0.55; pos = new THREE.Vector3(); vel = new THREE.Vector3(); this._nadeLaunch(charge, pos, vel);
-      this.weapon.recoil.kick(-0.4, 0.5, 1.2); this.weapon.recoilRot.kick(-3, 0, -1.5); audio.grappleFire(); ctx.input.rumble(0.2, 0.4, 50);
+      this.weapon.recoil.kick(-0.4, 0.5, 1.2); this.weapon.recoilRot.kick(-3, 0, -1.5); audio.grappleFire();
       if (this.onThrow) this.onThrow({ pos: pos.toArray().map((v) => +v.toFixed(2)), vel: vel.toArray().map((v) => +v.toFixed(2)) });
     }
     const g = new THREE.Group();
@@ -275,7 +279,7 @@ export class Player {
     for (let i = this.nades.length - 1; i >= 0; i--) {
       const n = this.nades[i]; n.fuse -= dt; n.tick += dt;
       if (!n.rest) {
-        n.vel.y -= 22 * dt; _v2.copy(n.pos); n.pos.addScaledVector(n.vel, dt);
+        n.vel.y -= 11 * dt; _v2.copy(n.pos); n.pos.addScaledVector(n.vel, dt); n.vel.y -= 11 * dt;
         _d.subVectors(n.pos, _v2); const len = _d.length();
         if (len > 1e-6) {
           _d.divideScalar(len); const hit = world.raycast(_v2, _d, len + 0.16);
@@ -295,7 +299,7 @@ export class Player {
   }
   explodeNade(n) {
     const ctx = this.ctx, R = 6.4, c = n.pos.clone(); c.y += 0.25;
-    ctx.effects.boom(c, R); audio.explosion(c); ctx.input.rumble(0.9, 0.9, 220);
+    ctx.effects.boom(c, R); audio.explosion(c);
     // bots: the thrower's client reports the damage (host applies it; a client's report is forwarded)
     if (n.mine) ctx.enemies.blastEnemies(c, R, 120, null);
     if (n.mine && ctx.blastBreakables) ctx.blastBreakables(c, R);
@@ -317,7 +321,7 @@ export class Player {
   _dash(dir) {
     const b = this.body; this.dashCd = 1.3; const cur = b.vel.x * dir.x + b.vel.z * dir.z; const target = Math.max(cur + 6, 14);
     b.vel.x += dir.x * (target - cur); b.vel.z += dir.z * (target - cur); b.vel.y = Math.max(b.vel.y, 2);
-    audio.dash(); this.kickFov(4); this.ctx.input.rumble(0.3, 0.6, 70); this.roll += (dir.x * this.right.x + dir.z * this.right.z) * 0.08;
+    audio.dash(); this.kickFov(4); this.roll += (dir.x * this.right.x + dir.z * this.right.z) * 0.08;
     _v2.copy(this.center).addScaledVector(dir, -0.6); this.ctx.effects.strokeBurst(_v2, INK.BLUE, 10, 5, { life: 0.25, size: 0.03 });
   }
   _tryMantle(fwd) {
@@ -373,11 +377,11 @@ export class Player {
     return null;
   }
   _fireGrapple() {
-    if (this.grapStam < STAM_MIN) { audio.winded(); this.ctx.hud.tip('抓钩需要缓口气', 0.9); return; }
-    const t = this._findGrappleTarget(); if (!t) { audio.empty(); return; }
+    if (this.grapStam < STAM_MIN) { audio.winded(); this.ctx.hud.tip(t('tip.grappleRest'), 0.9); return; }
+    const tgt = this._findGrappleTarget(); if (!tgt) { audio.empty(); return; }
     this.grapStam -= STAM_FIRE; this.stamPause = STAM_PAUSE;
-    const g = this.grapple; g.state = 'fly'; g.anchor.copy(t.point); this._handPos(g.from); g.hook.copy(g.from); g.flyT = 0; g.flyDur = clamp(t.dist / 110, 0.04, 0.6); g.enemy = t.enemy || null; g.mover = t.mover || null; g.t = 0;
-    audio.grappleFire(); this.ctx.input.rumble(0.15, 0.4, 40); this.weapon.recoil.kick(-0.3, 0.2, 0.5);
+    const g = this.grapple; g.state = 'fly'; g.anchor.copy(tgt.point); this._handPos(g.from); g.hook.copy(g.from); g.flyT = 0; g.flyDur = clamp(tgt.dist / 110, 0.04, 0.6); g.enemy = tgt.enemy || null; g.mover = tgt.mover || null; g.t = 0;
+    audio.grappleFire(); this.weapon.recoil.kick(-0.3, 0.2, 0.5);
   }
   detachGrapple(boost) {
     const g = this.grapple; if (g.state === 'idle') return; const was = g.state; g.state = 'idle'; g.cd = 0.12; g.enemy = null; g.mover = null; this.stamPause = STAM_PAUSE;
@@ -393,8 +397,8 @@ export class Player {
       if (g.mover) g.anchor.copy(g.mover.mesh.position);
       g.flyT += dt; const f = Math.min(1, g.flyT / g.flyDur); g.hook.lerpVectors(g.from, g.anchor, f);
       if (f >= 1) {
-        if (g.enemy) { if (g.enemy.alive) { ctx.enemies.yank(g.enemy, this.center); ctx.game.addScore(30, '拽翻'); audio.grappleHit(); ctx.input.rumble(0.5, 0.5, 90); } this.detachGrapple(false); }
-        else { g.state = 'on'; g.len = Math.max(1.5, this.center.distanceTo(g.anchor) * 0.94); g.blockedT = 0; g.t = 0; g.swingT = 0; audio.grappleHit(); audio.reelLoop(true); ctx.hud.grappleTarget(2); ctx.input.rumble(0.3, 0.6, 60); if (b.onGround) { b.vel.y = Math.max(b.vel.y, 5); b.onGround = false; } }
+        if (g.enemy) { if (g.enemy.alive) { ctx.enemies.yank(g.enemy, this.center); ctx.game.addScore(30, t('pts.yank')); audio.grappleHit(); } this.detachGrapple(false); }
+        else { g.state = 'on'; g.len = Math.max(1.5, this.center.distanceTo(g.anchor) * 0.94); g.blockedT = 0; g.t = 0; g.swingT = 0; audio.grappleHit(); audio.reelLoop(true); ctx.hud.grappleTarget(2); if (b.onGround) { b.vel.y = Math.max(b.vel.y, 5); b.onGround = false; } }
       }
     } else if (g.state === 'on') {
       if (g.mover) g.anchor.copy(g.mover.mesh.position);

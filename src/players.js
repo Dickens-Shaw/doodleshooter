@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { makeInkMaterial, setFill, INK } from './render.js';
 import { buildHumanoid, buildWeaponProp } from './enemies.js';
 import { clamp, damp, angleLerp, wrapAngle } from './util.js';
+import { GORE } from './effects.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const WEAPON_KINDS = ['rifle', 'shotgun', 'sniper', 'blade'];
@@ -25,7 +26,7 @@ export function encodeLocal(P, weaponIndex, extra = {}) {
 export class RemotePlayer {
   constructor(ctx, id, name, team, ink) {
     this.ctx = ctx; this.id = id; this.name = name || 'doodle'; this.team = team; this.ink = ink;
-    this.isLocal = false; this.alive = true; this.parryWindow = false; this.idle = false; this.idleSince = 0; this.untouched = false; this.away = false; this.hp = 100; this.maxHp = 100; this.speed = 0; this.weaponIndex = 0;
+    this.isLocal = false; this.alive = true; this.parryWindow = false; this.idle = false; this.idleSince = 0; this.untouched = false; this.away = false; this.hp = 110; this.maxHp = 110; this.speed = 0; this.weaponIndex = 0;
     this.body = { pos: new THREE.Vector3(0, -50, 0), vel: new THREE.Vector3(), halfW: 0.35, height: 1.75, onGround: true };
     this.center = new THREE.Vector3(); this.eye = new THREE.Vector3(); this.forward = new THREE.Vector3(0, 0, -1); this.right = new THREE.Vector3(1, 0, 0);
     this.yaw = 0; this.pitch = 0; this.crouching = false; this.sliding = false; this.blocking = false; this.aiming = false; this.firing = false;
@@ -42,9 +43,8 @@ export class RemotePlayer {
     const model = buildHumanoid(this.mat, this.solid, this.T);
     this.root = model.root; this.parts = model.parts; this.J = model.J; this.face = model.face;
     this.root.visible = false; this.ctx.scene.add(this.root); this.weaponIndex = -1;
-    // a name tag: a little flag above the head so you know who is who
+    // where the name and health tag hangs (drawn by the HUD)
     this.tagG = new THREE.Group(); this.root.add(this.tagG); this.tagG.position.y = 2.25;
-    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.02), makeInkMaterial({ ink: this.ink, fill: true, side: THREE.DoubleSide })); this.tagG.add(flag);
     this.corpse = false;
   }
   // knocked flat with some physics: the whole figure tumbles away as debris (bits come off on a
@@ -54,14 +54,15 @@ export class RemotePlayer {
     this.tagG.visible = false; this.rope.visible = false; this.hook.visible = false;
     const d = (dir && dir.lengthSq() > 0.01 ? dir.clone() : new THREE.Vector3(0, 0.4, -1)).normalize();
     const detach = (obj, extraVel, radius) => { if (!obj || !obj.parent) return; obj.updateWorldMatrix(true, false); scene.attach(obj); _v.copy(d).multiplyScalar(4 + Math.random() * 4).add(extraVel); _v.y += 2 + Math.random() * 3; eff.debris(obj, obj.position, _v, new THREE.Vector3((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16), { radius, blood: true, life: 7 + Math.random() * 3 }); };
-    if (over) { detach(J.headG, _v2.set((Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4), 0.25); if (Math.random() < 0.5) detach(Math.random() < 0.5 ? J.armL : J.armR, _v2.set((Math.random() - 0.5) * 6, 2, (Math.random() - 0.5) * 6), 0.12); }
+    if (over && !GORE) { detach(J.hatG, _v2.set((Math.random() - 0.5) * 4, 4, (Math.random() - 0.5) * 4), 0.12); eff.dizzy(this.parts.head.getWorldPosition(new THREE.Vector3()).add(_v2.set(0, 0.25, 0))); }
+    if (over && GORE) { detach(J.headG, _v2.set((Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4), 0.25); if (Math.random() < 0.5) detach(Math.random() < 0.5 ? J.armL : J.armR, _v2.set((Math.random() - 0.5) * 6, 2, (Math.random() - 0.5) * 6), 0.12); }
     // limp joints, then the body flies as one piece
     for (const k of ['armL', 'armR', 'legL', 'legR', 'foreL', 'foreR', 'shinL', 'shinR']) if (J[k]) { J[k].rotation.x = (Math.random() - 0.5) * 2.4; J[k].rotation.z = (Math.random() - 0.5) * 1.2; }
     if (this.face) { this.face.eyes.visible = false; this.face.xeyes.visible = true; }
     this.root.updateWorldMatrix(true, false); scene.attach(this.root);
     _v.copy(d).multiplyScalar(5 + Math.random() * 3); _v.y += 3.5 + Math.random() * 2; _v.addScaledVector(this.vel, 0.4);
-    eff.debris(this.root, this.root.position, _v, new THREE.Vector3((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 9), { radius: 0.55, blood: true, life: 8 });
-    eff.blood(this.center, d, 1.3); eff.bloodPool(this.body.pos, 1.2 + Math.random() * 0.6, INK.RED);
+    eff.debris(this.root, this.root.position, _v, new THREE.Vector3((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 9), { radius: 0.55, blood: true, life: GORE ? 8 : 2.8, erase: !GORE });
+    eff.blood(this.center, d, 1.3); if (GORE) eff.bloodPool(this.body.pos, 1.2 + Math.random() * 0.6, INK.RED);
     this.root = null;
   }
   get isBlocking() { return this.blocking; }

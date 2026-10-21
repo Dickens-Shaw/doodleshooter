@@ -4,6 +4,8 @@ import { makeInkMaterial, INK } from './render.js';
 import { SEE_THROUGH } from './physics.js';
 import { rand, clamp, damp, lerp, Spring3, TAU } from './util.js';
 import { audio } from './audio.js';
+import { t } from './i18n.js';
+import { GORE } from './effects.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);
@@ -63,10 +65,10 @@ class ViewModel {
 }
 
 const GUNS = {
-  rifle: { name: '步枪', hint: '全自动 · 让红点对准他们', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
-  shotgun: { name: '霰弹枪', hint: '泵动 · 近距离威力惊人', kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
-  sniper: { name: '狙击枪', hint: '栓动狙击 · 一枪一个擦除', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
-  revolver: { name: '左轮手枪', hint: '手炮 · 爆头即擦除', kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
+  rifle: { name: t('wpn.rifle'), hint: t('wpn.rifle.hint'), kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
+  shotgun: { name: t('wpn.shotgun'), hint: t('wpn.shotgun.hint'), kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
+  sniper: { name: t('wpn.sniper'), hint: t('wpn.sniper.hint'), kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
+  revolver: { name: t('wpn.revolver'), hint: t('wpn.revolver.hint'), kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
 };
 
 export class Gun extends ViewModel {
@@ -142,7 +144,7 @@ export class Gun extends ViewModel {
     if (this.cycleDur) { this.pumpT = this.cycleDur + 0.12; this.pumped = false; if (this.reloadType === 'shells') this.needPump = true; }
     const k = this.modelKick; this.recoil.kick(rand(-k[0], k[0]), rand(k[1] * 0.4, k[1]), k[2]); this.recoilRot.kick(k[3], rand(-k[4], k[4]), rand(-k[5], k[5]));
     P.recoil(this.camKick[0] * (st.aim ? 0.7 : 1) + rand(0, this.camKick[0] * 0.3), rand(-this.camKick[1], this.camKick[1])); P.kickFov(this.fovKick);
-    audio[this.sound](); ctx.input.rumble(0.15 + this.fovKick * 0.08, 0.5, 40 + this.fovKick * 15); ctx.effects.shakeAmt += 0.02 + this.fovKick * 0.02;
+    audio[this.sound](); ctx.effects.shakeAmt += 0.02 + this.fovKick * 0.02;
     if (hits > 0 && this.kind === 'shotgun') ctx.game.hitstop(0.03, 0.3);
     if (this.mag === 0 && this.reloadType === 'mag') setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
   }
@@ -251,7 +253,7 @@ export class Sniper extends Gun {
 
 export class Katana extends ViewModel {
   constructor(ctx) {
-    super(ctx); this.name = '太刀'; this.hint = '挥砍 · 按住瞄准格挡并反弹子弹'; this.kind = 'katana';
+    super(ctx); this.name = t('wpn.katana'); this.hint = t('wpn.katana.hint'); this.kind = 'katana';
     this.basePos.set(0.27, -0.25, -0.4); this.baseRot.set(0.75, 0.15, -0.35); this.aimPos.copy(this.basePos);
     this.slashT = 0; this.slashDur = 0.27; this.combo = 0; this.comboT = 0; this.blocking = false; this.blockT = 0; this.blockAmt = 0; this.hitDone = false; this.cooldown = 0; this.damage = 75;
     // guard pose: the sword simply comes in close to the face, held upright
@@ -266,9 +268,9 @@ export class Katana extends ViewModel {
     for (let i = 0; i < 6; i++) bx(0.036, 0.04, 0.02, 0, 0, 0.02 + i * 0.045, mat, g);
     hand(mat, 0.0, -0.005, 0.05, g, [0.5, -0.5, 1]); hand(mat, 0.0, -0.005, 0.2, g, [-0.4, -0.7, 1]);
     this.tip = new THREE.Object3D(); this.tip.position.set(0, 0, -1.05); g.add(this.tip);
-    // Blood clings to the flat of the blade. Each streak is a ragged sliver built in the plane of
-    // the steel and inset inside its silhouette, so nothing ever hangs off an edge.
-    const blood = makeInkMaterial({ ink: INK.RED, fill: true, side: THREE.DoubleSide });
+    // Ink (blood, with GORE on) clings to the flat of the blade. Each streak is a ragged sliver built in the
+    // plane of the steel and inset inside its silhouette, so nothing ever hangs off an edge.
+    const blood = makeInkMaterial({ ink: GORE ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
     const BH = 0.0168, BX = 0.0067;                 // blade half height, and the face to sit on
     this.smears = [];
     const spec = [
@@ -349,7 +351,7 @@ export class Katana extends ViewModel {
     if (ctx.cutRopes && ctx.cutRopes(P.eye, P.forward, 3.4)) any = true;
     if (ctx.breakablesInArc) for (const br of ctx.breakablesInArc(P.eye, P.forward, 3.2, Math.cos(1.0))) { any = true; ctx.breakHit(br, this.damage, br.pos.clone(), _v2.clone()); }
     // a swing only cuts; bullets are turned aside by the raised guard, never by a slash
-    if (any) { audio.katanaHit(); ctx.game.hitstop(0.07, 0.12); ctx.effects.shakeAmt += 0.12; ctx.input.rumble(0.7, 0.4, 90); this.recoil.kick(0, 0, 1.5); }
+    if (any) { audio.katanaHit(); ctx.game.hitstop(0.07, 0.12); ctx.effects.shakeAmt += 0.12; this.recoil.kick(0, 0, 1.5); }
   }
   onDeflect(perfect) {
     this.parrySwing = 1; this.parryDir = -this.parryDir;
